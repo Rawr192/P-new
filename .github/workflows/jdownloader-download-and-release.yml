@@ -1,0 +1,93 @@
+name: 3. Download via JDownloader CLI and Upload to Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: 'Comma-separated list of URLs to download'
+        required: true
+        type: string
+      release_tag:
+        description: 'GitHub Release Tag'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  download-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install JDownloader CLI (jdcli)
+        run: |
+          curl -sL https://github.com/mmdm/jdcli/releases/latest/download/jdcli_linux_amd64 -o /usr/local/bin/jdcli
+          chmod +x /usr/local/bin/jdcli
+
+      - name: Configure JDownloader CLI
+        env:
+          MYJD_EMAIL: ${{ secrets.MYJDOWNLOADER_EMAIL }}
+          MYJD_PASSWORD: ${{ secrets.MYJDOWNLOADER_PASSWORD }}
+          MYJD_DEVICE: ${{ secrets.MYJDOWNLOADER_DEVICE_NAME }}
+        run: |
+          mkdir -p ~/.config/jdcli
+          cat <<EOF > ~/.config/jdcli/config.yaml
+          email: "$MYJD_EMAIL"
+          password: "$MYJD_PASSWORD"
+          device: "$MYJD_DEVICE"
+          timeout: 60s
+          EOF
+
+      - name: Trigger Downloads via JDownloader CLI
+        run: |
+          IFS=',' read -ra URL_LIST <<< "${{ inputs.urls }}"
+          for url in "${URL_LIST[@]}"; do
+            echo "Adding URL to JDownloader: $url"
+            jdcli link add "$url"
+          done
+          jdcli download start
+
+      - name: Download Output Files
+        run: |
+          mkdir -p raw_downloads
+          IFS=',' read -ra URL_LIST <<< "${{ inputs.urls }}"
+          cd raw_downloads
+          for url in "${URL_LIST[@]}"; do
+            echo "Fetching file $url..."
+            curl -L -O "$url" || true
+          done
+
+      - name: Process & Split Files Exceeding 2GB Limit
+        run: |
+          mkdir -p release_assets
+          
+          for filepath in raw_downloads/*; do
+            if [ -f "$filepath" ]; then
+              filename=$(basename "$filepath")
+              filesize=$(stat -c%s "$filepath")
+              maxsize=2147483648  # 2 GB in bytes
+
+              if [ "$filesize" -gt "$maxsize" ]; then
+                echo "File $filename is larger than 2GB ($filesize bytes). Splitting into 2000M volumes..."
+                split -b 2000M -d --additional-suffix=.part "$filepath" "release_assets/${filename}."
+              else
+                echo "File $filename is under 2GB limit ($filesize bytes). Copying as-is."
+                cp "$filepath" release_assets/
+              fi
+            fi
+          done
+
+      - name: Create GitHub Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          name: "Release ${{ inputs.release_tag }}"
+          draft: false
+          prerelease: false
+          files: |
+            release_assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
