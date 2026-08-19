@@ -20,7 +20,6 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          sudo apt-get update
           python3 -m pip install pycryptodome requests
 
       - name: Extract Public Links via MEGA API (>100MB)
