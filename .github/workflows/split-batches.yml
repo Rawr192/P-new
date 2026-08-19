@@ -7,16 +7,16 @@ on:
     types:
       - completed
 
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
+
 jobs:
   process-batches:
     runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.create-matrix.outputs.matrix }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Explicitly pass run_id when triggered via workflow_run to locate parent artifact
       - name: Download Filtered Links
         uses: actions/download-artifact@v4
         with:
@@ -24,20 +24,17 @@ jobs:
           run-id: ${{ github.event.workflow_run.id || github.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Group Links into ~5GB Batches
-        id: create-matrix
+      - name: Group Links into ~5GB Batches & Trigger Downloads
         run: |
           python3 -c '
-          import os, json
+          import os, json, requests
 
-          MAX_SIZE = 5 * 1024 * 1024 * 1024  # 5 GB in bytes
+          MAX_SIZE = 5 * 1024 * 1024 * 1024  # 5 GB
           batches = []
           current_batch = []
           current_size = 0
 
           file_path = "filtered_links.txt"
-          
-          # Check current or subdirectory pathing for downloaded artifacts
           if not os.path.exists(file_path):
               for root, dirs, files in os.walk("."):
                   if "filtered_links.txt" in files:
@@ -64,15 +61,28 @@ jobs:
               if current_batch:
                   batches.append(current_batch)
 
-          matrix_output = {"include": [{"batch_id": i + 1, "urls": ",".join(b)} for i, b in enumerate(batches)]}
           print(f"Generated {len(batches)} batches.")
-          
-          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write(f"matrix={json.dumps(matrix_output)}\n")
-          '
 
-      - name: Upload Matrix Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: batch-matrix
-          path: ${{ github.output }}
+          # Trigger Download Workflow for each batch via API
+          token = "${{ secrets.GITHUB_TOKEN }}"
+          repo = "${{ github.repository }}"
+          
+          headers = {
+              "Authorization": f"token {token}",
+              "Accept": "application/vnd.github.v3+json"
+          }
+
+          for i, batch in enumerate(batches):
+              urls_str = ",".join(batch)
+              tag_name = f"v1.0.0-batch-{i+1}"
+              payload = {
+                  "ref": "main",
+                  "inputs": {
+                      "urls": urls_str,
+                      "release_tag": tag_name
+                  }
+              }
+              url = f"https://api.github.com/repos/{repo}/actions/workflows/jdownloader-download-and-release.yml/dispatches"
+              res = requests.post(url, headers=headers, json=payload)
+              print(f"Triggered batch {i+1}: Status {res.status_code}")
+          '
