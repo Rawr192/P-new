@@ -9,7 +9,7 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
 
 env:
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
@@ -67,7 +67,6 @@ jobs:
 
           print(f"Generated {len(batches)} batches.")
 
-          # Use Personal Access Token if provided, fallback to GITHUB_TOKEN
           token = "${{ secrets.WORKFLOW_DISPATCH_TOKEN || secrets.GITHUB_TOKEN }}"
           repo = "${{ github.repository }}"
           
@@ -77,17 +76,38 @@ jobs:
               "X-GitHub-Api-Version": "2022-11-28"
           }
 
+          # Define the target release tag and title
+          TARGET_RELEASE = "downloads"
+
+          # 1. Ensure the "downloads" release exists via GitHub API
+          release_url = f"https://api.github.com/repos/{repo}/releases/tags/{TARGET_RELEASE}"
+          check_res = requests.get(release_url, headers=headers)
+
+          if check_res.status_code == 404:
+              print(f"Release \"{TARGET_RELEASE}\" not found. Creating it now...")
+              create_url = f"https://api.github.com/repos/{repo}/releases"
+              release_payload = {
+                  "tag_name": TARGET_RELEASE,
+                  "name": "downloads",
+                  "body": "Centralized release containing all downloaded batch files.",
+                  "draft": False,
+                  "prerelease": False
+              }
+              create_res = requests.post(create_url, headers=headers, json=release_payload)
+              print(f"Created release status: {create_res.status_code}")
+
+          # 2. Trigger Workflow 3 for each batch targeting the "downloads" release
+          dispatch_url = f"https://api.github.com/repos/{repo}/actions/workflows/jdownloader-download-and-release.yml/dispatches"
+
           for i, batch in enumerate(batches):
               urls_str = ",".join(batch)
-              tag_name = f"v1.0.0-batch-{i+1}"
               payload = {
                   "ref": "main",
                   "inputs": {
                       "urls": urls_str,
-                      "release_tag": tag_name
+                      "release_tag": TARGET_RELEASE
                   }
               }
-              url = f"https://api.github.com/repos/{repo}/actions/workflows/jdownloader-download-and-release.yml/dispatches"
-              res = requests.post(url, headers=headers, json=payload)
-              print(f"Triggered batch {i+1}: Status {res.status_code}")
+              res = requests.post(dispatch_url, headers=headers, json=payload)
+              print(f"Triggered batch {i+1} targeting \"{TARGET_RELEASE}\": Status {res.status_code}")
           '
