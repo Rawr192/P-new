@@ -1,4 +1,4 @@
-name: 3. Download via Megatools and Upload to Release
+name: 3. Download via Python Native Mega Engine and Upload to Release
 
 on:
   workflow_dispatch:
@@ -25,21 +25,91 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Megatools
+      - name: Install Python Cryptography Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y megatools
+          python3 -m pip install pycryptodome requests
 
-      - name: Download Files via Megatools
+      - name: Download Files natively via Python
         run: |
           mkdir -p raw_downloads
-          cd raw_downloads
           
-          IFS=',' read -ra URL_LIST <<< "${{ inputs.urls }}"
-          for url in "${URL_LIST[@]}"; do
-            echo "Downloading MEGA URL: $url"
-            megadl --path . "$url" || true
-          done
+          python3 -c '
+          import os, sys, re, json, base64, struct, requests
+          from Crypto.Cipher import AES
+
+          def base64_url_decode(data):
+              data += "=" * ((4 - len(data) % 4) % 4)
+              return base64.urlsafe_b64decode(data)
+
+          def base64_to_a32(s):
+              return str_to_a32(base64_url_decode(s))
+
+          def str_to_a32(b):
+              if len(b) % 4:
+                  b += b"\0" * (4 - len(b) % 4)
+              return struct.unpack(f">{len(b)//4}I", b)
+
+          def a32_to_str(a):
+              return struct.pack(f">{len(a)}I", *a)
+
+          def aes_cbc_decrypt(data, key):
+              cipher = AES.new(a32_to_str(key), AES.MODE_CBC, b"\0" * 16)
+              return cipher.decrypt(data)
+
+          def decrypt_ctr(data, key, iv):
+              cipher = AES.new(a32_to_str(key), AES.MODE_CTR, counter=iv)
+              return cipher.decrypt(data)
+
+          urls = "${{ inputs.urls }}".split(",")
+          
+          for url in urls:
+              url = url.strip()
+              if not url:
+                  continue
+                  
+              print(f"Starting download for: {url}")
+              match = re.search(r"mega\.nz/file/([^#]+)#([^#]+)", url)
+              if not match:
+                  print(f"Skipping malformed link: {url}")
+                  continue
+
+              file_id, folder_key = match.group(1), match.group(2)
+              key_a32 = base64_to_a32(folder_key)
+
+              # Query node info
+              api_url = f"https://g.api.mega.co.nz/cs?id=0"
+              payload = [{"a": "g", "g": 1, "n": file_id}]
+              res = requests.post(api_url, json=payload).json()
+
+              if not isinstance(res, list) or "g" not in res[0]:
+                  print(f"Failed to fetch metadata for file ID {file_id}")
+                  continue
+
+              file_info = res[0]
+              dl_url = file_info["g"]
+              file_size = file_info["s"]
+              
+              # Derive AES key from folder key
+              k = [key_a32[0] ^ key_a32[4], key_a32[1] ^ key_a32[5], key_a32[2] ^ key_a32[6], key_a32[3] ^ key_a32[7]]
+              
+              # Fetch encrypted file content
+              print(f"Downloading stream ({file_size} bytes)...")
+              r = requests.get(dl_url, stream=True)
+              
+              out_path = os.path.join("raw_downloads", f"{file_id}.bin")
+              
+              # Decrypt in AES-CTR mode
+              iv = struct.pack(">QQ", key_a32[4] << 32 | key_a32[5], 0)
+              cipher = AES.new(a32_to_str(k), AES.MODE_CTR, initial_value=iv, nonce=b"")
+              
+              with open(out_path, "wb") as f:
+                  for chunk in r.iter_content(chunk_size=1024*1024):
+                      if chunk:
+                          f.write(cipher.decrypt(chunk))
+                          
+              print(f"Finished downloading: {out_path}")
+          '
 
       - name: Process & Split Files Exceeding 2GB Limit
         run: |
