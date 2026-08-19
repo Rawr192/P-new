@@ -7,6 +7,10 @@ on:
     types:
       - completed
 
+permissions:
+  actions: write
+  contents: read
+
 env:
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
 
@@ -63,13 +67,14 @@ jobs:
 
           print(f"Generated {len(batches)} batches.")
 
-          # Trigger Download Workflow for each batch via API
-          token = "${{ secrets.GITHUB_TOKEN }}"
+          # Use Personal Access Token if provided, fallback to GITHUB_TOKEN
+          token = "${{ secrets.WORKFLOW_DISPATCH_TOKEN || secrets.GITHUB_TOKEN }}"
           repo = "${{ github.repository }}"
           
           headers = {
-              "Authorization": f"token {token}",
-              "Accept": "application/vnd.github.v3+json"
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28"
           }
 
           for i, batch in enumerate(batches):
