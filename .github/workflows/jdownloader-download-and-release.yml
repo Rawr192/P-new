@@ -3,8 +3,12 @@ name: 3. Download via MEGAcmd and Upload to Release
 on:
   workflow_dispatch:
     inputs:
-      urls:
-        description: 'Comma-separated list of URLs to download'
+      folder_url:
+        description: 'MEGA Folder URL'
+        required: true
+        type: string
+      node_ids:
+        description: 'Comma-separated list of node IDs'
         required: true
         type: string
       release_tag:
@@ -40,14 +44,15 @@ jobs:
           mkdir -p raw_downloads
           cd raw_downloads
 
-          URLS=$(echo "${{ inputs.urls }}" | tr ',' ' ')
+          FOLDER_URL="${{ inputs.folder_url }}"
+          NODES=$(echo "${{ inputs.node_ids }}" | tr ',' ' ')
           
-          for url in $URLS; do
-            # Convert file/ID#KEY format to legacy #!ID!KEY format supported by mega-get
-            LEGACY_URL=$(echo "$url" | sed -E 's|https://mega\.nz/file/([^#]+)#(.*)|https://mega.nz/#!\1!\2|')
+          for node_id in $NODES; do
+            # Build valid MEGA folder-file node link
+            NODE_URL="${FOLDER_URL}/file/${node_id}"
             
-            echo "Downloading transformed link: $LEGACY_URL"
-            mega-get "$LEGACY_URL" ./ || true
+            echo "Downloading file node: $NODE_URL"
+            mega-get "$NODE_URL" ./ || true
           done
 
       - name: Process & Split Files Exceeding 2GB Limit
