@@ -1,0 +1,64 @@
+name: 2. Split Links into 5GB Batches
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["1. Fetch and Filter MEGA Links"]
+    types:
+      - completed
+
+jobs:
+  process-batches:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.create-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Filtered Links
+        uses: actions/download-artifact@v4
+        with:
+          name: mega-filtered-links
+
+      - name: Group Links into ~5GB Batches
+        id: create-matrix
+        run: |
+          python3 -c '
+          import os, json
+
+          MAX_SIZE = 5 * 1024 * 1024 * 1024  # 5 GB in bytes
+          batches = []
+          current_batch = []
+          current_size = 0
+
+          if os.path.exists("filtered_links.txt"):
+              with open("filtered_links.txt", "r") as f:
+                  for line in f:
+                      if not line.strip():
+                          continue
+                      parts = line.strip().split("|")
+                      size = int(parts[0])
+                      url = parts[-1].split()[-1]
+
+                      if current_size + size > MAX_SIZE and current_batch:
+                          batches.append(current_batch)
+                          current_batch = []
+                          current_size = 0
+
+                      current_batch.append(url)
+                      current_size += size
+
+              if current_batch:
+                  batches.append(current_batch)
+
+          matrix_output = {"include": [{"batch_id": i + 1, "urls": ",".join(b)} for i, b in enumerate(batches)]}
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"matrix={json.dumps(matrix_output)}\n")
+          '
+
+      - name: Upload Matrix Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: batch-matrix
+          path: $GITHUB_OUTPUT
