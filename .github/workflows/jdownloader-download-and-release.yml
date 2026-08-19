@@ -15,6 +15,9 @@ on:
 permissions:
   contents: write
 
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
+
 jobs:
   download-and-release:
     runs-on: ubuntu-latest
@@ -46,17 +49,17 @@ jobs:
           IFS=',' read -ra URL_LIST <<< "${{ inputs.urls }}"
           for url in "${URL_LIST[@]}"; do
             echo "Adding URL to JDownloader: $url"
-            jdcli link add "$url"
+            jdcli link add "$url" || true
           done
-          jdcli download start
+          jdcli download start || true
 
-      - name: Download Output Files
+      - name: Fetch Files
         run: |
           mkdir -p raw_downloads
           IFS=',' read -ra URL_LIST <<< "${{ inputs.urls }}"
           cd raw_downloads
           for url in "${URL_LIST[@]}"; do
-            echo "Fetching file $url..."
+            echo "Fetching $url..."
             curl -L -O "$url" || true
           done
 
@@ -68,13 +71,13 @@ jobs:
             if [ -f "$filepath" ]; then
               filename=$(basename "$filepath")
               filesize=$(stat -c%s "$filepath")
-              maxsize=2147483648  # 2 GB in bytes
+              maxsize=2147483648  # 2 GB limit
 
               if [ "$filesize" -gt "$maxsize" ]; then
-                echo "File $filename is larger than 2GB ($filesize bytes). Splitting into 2000M volumes..."
+                echo "File $filename is larger than 2GB ($filesize bytes). Splitting into 2000M parts..."
                 split -b 2000M -d --additional-suffix=.part "$filepath" "release_assets/${filename}."
               else
-                echo "File $filename is under 2GB limit ($filesize bytes). Copying as-is."
+                echo "File $filename is under 2GB ($filesize bytes). Moving as-is."
                 cp "$filepath" release_assets/
               fi
             fi
