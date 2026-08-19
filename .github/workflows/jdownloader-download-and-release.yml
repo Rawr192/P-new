@@ -1,4 +1,4 @@
-name: 3. Download via JDownloader CLI and Upload to Release
+name: 3. Download via Megatools and Upload to Release
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ on:
       release_tag:
         description: 'GitHub Release Tag'
         required: true
-        default: 'v1.0.0'
+        default: 'downloads'
 
 permissions:
   contents: write
@@ -25,42 +25,20 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install JDownloader CLI (jdcli)
+      - name: Install Megatools
         run: |
-          curl -sL https://github.com/mmdm/jdcli/releases/latest/download/jdcli_linux_amd64 -o /usr/local/bin/jdcli
-          chmod +x /usr/local/bin/jdcli
+          sudo apt-get update
+          sudo apt-get install -y megatools
 
-      - name: Configure JDownloader CLI
-        env:
-          MYJD_EMAIL: ${{ secrets.MYJDOWNLOADER_EMAIL }}
-          MYJD_PASSWORD: ${{ secrets.MYJDOWNLOADER_PASSWORD }}
-          MYJD_DEVICE: ${{ secrets.MYJDOWNLOADER_DEVICE_NAME }}
-        run: |
-          mkdir -p ~/.config/jdcli
-          cat <<EOF > ~/.config/jdcli/config.yaml
-          email: "$MYJD_EMAIL"
-          password: "$MYJD_PASSWORD"
-          device: "$MYJD_DEVICE"
-          timeout: 60s
-          EOF
-
-      - name: Trigger Downloads via JDownloader CLI
-        run: |
-          IFS=',' read -ra URL_LIST <<< "${{ inputs.urls }}"
-          for url in "${URL_LIST[@]}"; do
-            echo "Adding URL to JDownloader: $url"
-            jdcli link add "$url" || true
-          done
-          jdcli download start || true
-
-      - name: Fetch Files
+      - name: Download Files via Megatools
         run: |
           mkdir -p raw_downloads
-          IFS=',' read -ra URL_LIST <<< "${{ inputs.urls }}"
           cd raw_downloads
+          
+          IFS=',' read -ra URL_LIST <<< "${{ inputs.urls }}"
           for url in "${URL_LIST[@]}"; do
-            echo "Fetching $url..."
-            curl -L -O "$url" || true
+            echo "Downloading MEGA URL: $url"
+            megadl --path . "$url" || true
           done
 
       - name: Process & Split Files Exceeding 2GB Limit
@@ -83,11 +61,11 @@ jobs:
             fi
           done
 
-      - name: Create GitHub Release and Upload Assets
+      - name: Upload Assets to Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.release_tag }}
-          name: "Release ${{ inputs.release_tag }}"
+          name: "downloads"
           draft: false
           prerelease: false
           files: |
