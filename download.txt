@@ -1,0 +1,1 @@
+curl -s https://api.github.com/repos/Rawr192/P-new/releases/tags/downloads | grep -oP '"browser_download_url": "\K[^"]+' | aria2c -i - -d downloads -j 4 -s 16 -x 16
