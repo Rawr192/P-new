@@ -32,7 +32,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends "/tmp/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb"
           rm -f "/tmp/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb"
 
-      - name: Verify MEGAcmd installation
+      - name: Verify MEGAcmd Installation
         run: mega-version
 
       - name: Download Files via MEGAcmd
@@ -40,12 +40,14 @@ jobs:
           mkdir -p raw_downloads
           cd raw_downloads
 
-          # Replace commas with spaces to iterate cleanly
           URLS=$(echo "${{ inputs.urls }}" | tr ',' ' ')
           
           for url in $URLS; do
-            echo "Downloading with mega-get: $url"
-            mega-get "$url" ./ || true
+            # Convert file/ID#KEY format to legacy #!ID!KEY format supported by mega-get
+            LEGACY_URL=$(echo "$url" | sed -E 's|https://mega\.nz/file/([^#]+)#(.*)|https://mega.nz/#!\1!\2|')
+            
+            echo "Downloading transformed link: $LEGACY_URL"
+            mega-get "$LEGACY_URL" ./ || true
           done
 
       - name: Process & Split Files Exceeding 2GB Limit
