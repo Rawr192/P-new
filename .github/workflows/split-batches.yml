@@ -16,10 +16,13 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # Explicitly pass run_id when triggered via workflow_run to locate parent artifact
       - name: Download Filtered Links
         uses: actions/download-artifact@v4
         with:
           name: mega-filtered-links
+          run-id: ${{ github.event.workflow_run.id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Group Links into ~5GB Batches
         id: create-matrix
@@ -32,8 +35,17 @@ jobs:
           current_batch = []
           current_size = 0
 
-          if os.path.exists("filtered_links.txt"):
-              with open("filtered_links.txt", "r") as f:
+          file_path = "filtered_links.txt"
+          
+          # Check current or subdirectory pathing for downloaded artifacts
+          if not os.path.exists(file_path):
+              for root, dirs, files in os.walk("."):
+                  if "filtered_links.txt" in files:
+                      file_path = os.path.join(root, "filtered_links.txt")
+                      break
+
+          if os.path.exists(file_path):
+              with open(file_path, "r") as f:
                   for line in f:
                       if not line.strip():
                           continue
@@ -53,6 +65,8 @@ jobs:
                   batches.append(current_batch)
 
           matrix_output = {"include": [{"batch_id": i + 1, "urls": ",".join(b)} for i, b in enumerate(batches)]}
+          print(f"Generated {len(batches)} batches.")
+          
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
               out.write(f"matrix={json.dumps(matrix_output)}\n")
           '
@@ -61,4 +75,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: batch-matrix
-          path: $GITHUB_OUTPUT
+          path: ${{ github.output }}
