@@ -27,15 +27,15 @@ jobs:
 
       - name: Install Python Cryptography Dependencies
         run: |
-          sudo apt-get update
-          python3 -m pip install pycryptodome requests
+          python3 -m pip install --no-cache-dir pycryptodome requests
 
-      - name: Download Files natively via Python
+      - name: Download Files Fast via Multi-Threaded Engine
         run: |
           mkdir -p raw_downloads
           
           python3 -c '
-          import os, sys, re, json, base64, struct, requests
+          import os, sys, re, json, base64, struct, requests, time
+          from concurrent.futures import ThreadPoolExecutor
           from Crypto.Cipher import AES
 
           def base64_url_decode(data):
@@ -53,62 +53,62 @@ jobs:
           def a32_to_str(a):
               return struct.pack(f">{len(a)}I", *a)
 
-          def aes_cbc_decrypt(data, key):
-              cipher = AES.new(a32_to_str(key), AES.MODE_CBC, b"\0" * 16)
-              return cipher.decrypt(data)
-
-          def decrypt_ctr(data, key, iv):
-              cipher = AES.new(a32_to_str(key), AES.MODE_CTR, counter=iv)
-              return cipher.decrypt(data)
-
-          urls = "${{ inputs.urls }}".split(",")
-          
-          for url in urls:
+          def download_file(url):
               url = url.strip()
               if not url:
-                  continue
+                  return
                   
-              print(f"Starting download for: {url}")
               match = re.search(r"mega\.nz/file/([^#]+)#([^#]+)", url)
               if not match:
-                  print(f"Skipping malformed link: {url}")
-                  continue
+                  print(f"Skipping invalid URL format: {url}")
+                  return
 
               file_id, folder_key = match.group(1), match.group(2)
               key_a32 = base64_to_a32(folder_key)
 
-              # Query node info
               api_url = f"https://g.api.mega.co.nz/cs?id=0"
               payload = [{"a": "g", "g": 1, "n": file_id}]
-              res = requests.post(api_url, json=payload).json()
-
-              if not isinstance(res, list) or "g" not in res[0]:
-                  print(f"Failed to fetch metadata for file ID {file_id}")
-                  continue
-
-              file_info = res[0]
-              dl_url = file_info["g"]
-              file_size = file_info["s"]
               
-              # Derive AES key from folder key
+              # Retry logic for API calls
+              res = None
+              for attempt in range(3):
+                  try:
+                      response = requests.post(api_url, json=payload, timeout=15).json()
+                      if isinstance(response, list) and len(response) > 0 and isinstance(response[0], dict):
+                          res = response[0]
+                          break
+                  except Exception as e:
+                      pass
+                  time.sleep(2)
+
+              if not res or "g" not in res:
+                  print(f"Failed or rate-limited fetching metadata for file ID: {file_id}")
+                  return
+
+              dl_url = res["g"]
+              file_size = res.get("s", 0)
+              
               k = [key_a32[0] ^ key_a32[4], key_a32[1] ^ key_a32[5], key_a32[2] ^ key_a32[6], key_a32[3] ^ key_a32[7]]
               
-              # Fetch encrypted file content
-              print(f"Downloading stream ({file_size} bytes)...")
+              print(f"Downloading {file_id} ({file_size} bytes)...")
               r = requests.get(dl_url, stream=True)
-              
               out_path = os.path.join("raw_downloads", f"{file_id}.bin")
               
-              # Decrypt in AES-CTR mode
               iv = struct.pack(">QQ", key_a32[4] << 32 | key_a32[5], 0)
               cipher = AES.new(a32_to_str(k), AES.MODE_CTR, initial_value=iv, nonce=b"")
               
               with open(out_path, "wb") as f:
-                  for chunk in r.iter_content(chunk_size=1024*1024):
+                  for chunk in r.iter_content(chunk_size=8*1024*1024):
                       if chunk:
                           f.write(cipher.decrypt(chunk))
                           
-              print(f"Finished downloading: {out_path}")
+              print(f"Completed download: {out_path}")
+
+          urls = "${{ inputs.urls }}".split(",")
+          
+          # Process transfers across thread workers
+          with ThreadPoolExecutor(max_workers=3) as executor:
+              executor.map(download_file, urls)
           '
 
       - name: Process & Split Files Exceeding 2GB Limit
@@ -122,10 +122,9 @@ jobs:
               maxsize=2147483648  # 2 GB limit
 
               if [ "$filesize" -gt "$maxsize" ]; then
-                echo "File $filename is larger than 2GB ($filesize bytes). Splitting into 2000M parts..."
+                echo "File $filename exceeds 2GB ($filesize bytes). Splitting into 2000M chunks..."
                 split -b 2000M -d --additional-suffix=.part "$filepath" "release_assets/${filename}."
               else
-                echo "File $filename is under 2GB ($filesize bytes). Moving as-is."
                 cp "$filepath" release_assets/
               fi
             fi
