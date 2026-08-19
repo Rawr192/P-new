@@ -76,10 +76,9 @@ jobs:
               "X-GitHub-Api-Version": "2022-11-28"
           }
 
-          # Define the target release tag and title
           TARGET_RELEASE = "downloads"
 
-          # 1. Ensure the "downloads" release exists via GitHub API
+          # 1. Ensure the "downloads" release exists
           release_url = f"https://api.github.com/repos/{repo}/releases/tags/{TARGET_RELEASE}"
           check_res = requests.get(release_url, headers=headers)
 
@@ -96,7 +95,7 @@ jobs:
               create_res = requests.post(create_url, headers=headers, json=release_payload)
               print(f"Created release status: {create_res.status_code}")
 
-          # 2. Trigger Workflow 3 for each batch targeting the "downloads" release
+          # 2. Trigger Workflow 3 for each batch
           dispatch_url = f"https://api.github.com/repos/{repo}/actions/workflows/jdownloader-download-and-release.yml/dispatches"
 
           for i, batch in enumerate(batches):
