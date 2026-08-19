@@ -1,0 +1,37 @@
+name: 1. Fetch and Filter MEGA Links
+
+on:
+  workflow_dispatch:
+    inputs:
+      mega_url:
+        description: 'MEGA Folder URL'
+        required: true
+        type: string
+
+jobs:
+  fetch-and-filter:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Megatools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y megatools jq
+
+      - name: Fetch and Filter Links (>100MB)
+        run: |
+          mkdir -p output
+          megals -l --reload "${{ inputs.mega_url }}" > mega_files.txt || true
+          
+          # Filter files > 100MB (100MB = 104,857,600 bytes)
+          awk -v min_size=104857600 '$1 >= min_size {print $1 "|" $0}' mega_files.txt > output/filtered_links.txt
+
+          echo "Total files found over 100MB: $(wc -l < output/filtered_links.txt)"
+
+      - name: Upload Filtered Links Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mega-filtered-links
+          path: output/filtered_links.txt
