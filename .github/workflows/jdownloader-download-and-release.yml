@@ -1,4 +1,4 @@
-name: 3. Download via Python Native Mega Engine and Upload to Release
+name: 3. Download via MEGAcmd and Upload to Release
 
 on:
   workflow_dispatch:
@@ -25,91 +25,28 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Python Cryptography Dependencies
+      - name: Install MEGAcmd
         run: |
-          python3 -m pip install --no-cache-dir pycryptodome requests
+          UBUNTU_VERSION=$(lsb_release -rs)
+          wget -q -P /tmp "https://mega.nz/linux/repo/xUbuntu_${UBUNTU_VERSION}/amd64/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb" 
+          sudo apt-get install -y --no-install-recommends "/tmp/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb"
+          rm -f "/tmp/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb"
 
-      - name: Download Files Fast via Multi-Threaded Engine
+      - name: Verify MEGAcmd installation
+        run: mega-version
+
+      - name: Download Files via MEGAcmd
         run: |
           mkdir -p raw_downloads
+          cd raw_downloads
+
+          # Replace commas with spaces to iterate cleanly
+          URLS=$(echo "${{ inputs.urls }}" | tr ',' ' ')
           
-          python3 -c '
-          import os, sys, re, json, base64, struct, requests, time
-          from concurrent.futures import ThreadPoolExecutor
-          from Crypto.Cipher import AES
-
-          def base64_url_decode(data):
-              data += "=" * ((4 - len(data) % 4) % 4)
-              return base64.urlsafe_b64decode(data)
-
-          def base64_to_a32(s):
-              return str_to_a32(base64_url_decode(s))
-
-          def str_to_a32(b):
-              if len(b) % 4:
-                  b += b"\0" * (4 - len(b) % 4)
-              return struct.unpack(f">{len(b)//4}I", b)
-
-          def a32_to_str(a):
-              return struct.pack(f">{len(a)}I", *a)
-
-          def download_file(url):
-              url = url.strip()
-              if not url:
-                  return
-                  
-              match = re.search(r"mega\.nz/file/([^#]+)#([^#]+)", url)
-              if not match:
-                  print(f"Skipping invalid URL format: {url}")
-                  return
-
-              file_id, folder_key = match.group(1), match.group(2)
-              key_a32 = base64_to_a32(folder_key)
-
-              api_url = f"https://g.api.mega.co.nz/cs?id=0"
-              payload = [{"a": "g", "g": 1, "n": file_id}]
-              
-              # Retry logic for API calls
-              res = None
-              for attempt in range(3):
-                  try:
-                      response = requests.post(api_url, json=payload, timeout=15).json()
-                      if isinstance(response, list) and len(response) > 0 and isinstance(response[0], dict):
-                          res = response[0]
-                          break
-                  except Exception as e:
-                      pass
-                  time.sleep(2)
-
-              if not res or "g" not in res:
-                  print(f"Failed or rate-limited fetching metadata for file ID: {file_id}")
-                  return
-
-              dl_url = res["g"]
-              file_size = res.get("s", 0)
-              
-              k = [key_a32[0] ^ key_a32[4], key_a32[1] ^ key_a32[5], key_a32[2] ^ key_a32[6], key_a32[3] ^ key_a32[7]]
-              
-              print(f"Downloading {file_id} ({file_size} bytes)...")
-              r = requests.get(dl_url, stream=True)
-              out_path = os.path.join("raw_downloads", f"{file_id}.bin")
-              
-              iv = struct.pack(">QQ", key_a32[4] << 32 | key_a32[5], 0)
-              cipher = AES.new(a32_to_str(k), AES.MODE_CTR, initial_value=iv, nonce=b"")
-              
-              with open(out_path, "wb") as f:
-                  for chunk in r.iter_content(chunk_size=8*1024*1024):
-                      if chunk:
-                          f.write(cipher.decrypt(chunk))
-                          
-              print(f"Completed download: {out_path}")
-
-          urls = "${{ inputs.urls }}".split(",")
-          
-          # Process transfers across thread workers
-          with ThreadPoolExecutor(max_workers=3) as executor:
-              executor.map(download_file, urls)
-          '
+          for url in $URLS; do
+            echo "Downloading with mega-get: $url"
+            mega-get "$url" ./ || true
+          done
 
       - name: Process & Split Files Exceeding 2GB Limit
         run: |
