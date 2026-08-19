@@ -20,32 +20,16 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          python3 -m pip install pycryptodome requests
+          python3 -m pip install --no-cache-dir pycryptodome requests
 
       - name: Extract Public Links via MEGA API (>100MB)
         run: |
           mkdir -p output
           
           python3 -c '
-          import os, re, json, base64, struct, requests
-          from Crypto.Cipher import AES
+          import os, re, json, requests
 
-          def base64_url_decode(data):
-              data += "=" * ((4 - len(data) % 4) % 4)
-              return base64.urlsafe_b64decode(data)
-
-          def base64_to_a32(s):
-              return str_to_a32(base64_url_decode(s))
-
-          def str_to_a32(b):
-              if len(b) % 4:
-                  b += b"\0" * (4 - len(b) % 4)
-              return struct.unpack(f">{len(b)//4}I", b)
-
-          def a32_to_str(a):
-              return struct.pack(f">{len(a)}I", *a)
-
-          url = "${{ inputs.mega_url }}"
+          url = "${{ inputs.mega_url }}".strip()
           
           match = re.search(r"mega\.nz/(?:folder/|#F!)([^#?#]+)[#?!]([^#?&]+)", url)
           if not match:
@@ -53,28 +37,29 @@ jobs:
               exit(1)
 
           folder_id, folder_key = match.group(1), match.group(2)
+          canonical_folder_url = f"https://mega.nz/folder/{folder_id}#{folder_key}"
 
           api_url = f"https://g.api.mega.co.nz/cs?id=0&n={folder_id}"
           payload = [{"a": "f", "c": 1, "r": 1}]
           
           response = requests.post(api_url, json=payload).json()
-
           files = response[0].get("f", []) if isinstance(response, list) and len(response) > 0 else []
 
           min_bytes = 100 * 1024 * 1024  # 100MB
-          filtered_links = []
+          filtered_items = []
 
           for f in files:
               if f.get("t") == 0 and f.get("s", 0) >= min_bytes:
-                  file_id = f.get("h")
+                  node_id = f.get("h")
                   size = f.get("s")
-                  file_url = f"https://mega.nz/file/{file_id}#{folder_key}"
-                  filtered_links.append(f"{size}|{file_url}")
+                  filtered_items.append(f"{size}|{node_id}")
 
+          # Store the canonical folder URL on the first line
           with open("output/filtered_links.txt", "w") as out:
-              out.write("\n".join(filtered_links))
+              out.write(f"FOLDER_URL|{canonical_folder_url}\n")
+              out.write("\n".join(filtered_items))
 
-          print(f"Exported {len(filtered_links)} files larger than 100MB.")
+          print(f"Exported {len(filtered_items)} files larger than 100MB.")
           '
 
       - name: Upload Filtered Links Artifact
