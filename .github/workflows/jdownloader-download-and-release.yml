@@ -14,7 +14,8 @@ on:
       release_tag:
         description: 'GitHub Release Tag'
         required: true
-        default: 'downloads2'
+        default: 'downloads'
+        type: string
 
 permissions:
   contents: write
@@ -41,16 +42,14 @@ jobs:
 
       - name: Download Files via MEGAcmd
         run: |
-          mkdir -p raw_downloads2
-          cd raw_downloads2
+          mkdir -p raw_downloads
+          cd raw_downloads
 
           FOLDER_URL="${{ inputs.folder_url }}"
           NODES=$(echo "${{ inputs.node_ids }}" | tr ',' ' ')
           
           for node_id in $NODES; do
-            # Build valid MEGA folder-file node link
             NODE_URL="${FOLDER_URL}/file/${node_id}"
-            
             echo "Downloading file node: $NODE_URL"
             mega-get "$NODE_URL" ./ || true
           done
@@ -59,7 +58,7 @@ jobs:
         run: |
           mkdir -p release_assets
           
-          for filepath in raw_downloads2/*; do
+          for filepath in raw_downloads/*; do
             if [ -f "$filepath" ]; then
               filename=$(basename "$filepath")
               filesize=$(stat -c%s "$filepath")
@@ -78,7 +77,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.release_tag }}
-          name: "downloads2"
+          name: ${{ inputs.release_tag }}
           draft: false
           prerelease: false
           files: |
