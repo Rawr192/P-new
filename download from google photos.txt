@@ -1,0 +1,71 @@
+python3 -c '
+import urllib.request, re, os, sys, time
+
+url_input = input("Enter Google Photos Album URL [Leave blank for default]: ").strip()
+album_url = url_input if url_input else "https://photos.app.goo.gl/uN367eDWCEuN56fC9"
+
+headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+req = urllib.request.Request(album_url, headers=headers)
+html = urllib.request.urlopen(req).read().decode("utf-8")
+
+urls = list(set(re.findall(r"https://lh3\.googleusercontent\.com/pw/[a-zA-Z0-9\-_]{80,}", html)))
+print(f"\nFound {len(urls)} videos. Starting download process...\n")
+
+for i, base_url in enumerate(urls, 1):
+    video_url = f"{base_url}=dv"
+    req = urllib.request.Request(video_url, headers=headers)
+    
+    with urllib.request.urlopen(req) as resp:
+        content_disp = resp.headers.get("Content-Disposition", "")
+        match = re.search(r"filename\*?=(?:UTF-8'\'')?\"?([^\";]+)\"?", content_disp)
+        filename = match.group(1).strip() if match else f"video_{i}.mp4"
+        total_size = int(resp.headers.get("Content-Length", 0))
+
+    downloaded_size = os.path.getsize(filename) if os.path.exists(filename) else 0
+
+    if total_size > 0 and downloaded_size >= total_size:
+        print(f"[{i}/{len(urls)}] Skipping (Already finished): {filename}")
+        continue
+
+    download_headers = headers.copy()
+    if downloaded_size > 0:
+        download_headers["Range"] = f"bytes={downloaded_size}-"
+        print(f"[{i}/{len(urls)}] Resuming: {filename} from {downloaded_size / (1024*1024):.2f} MB")
+    else:
+        print(f"[{i}/{len(urls)}] Downloading: {filename}")
+
+    req = urllib.request.Request(video_url, headers=download_headers)
+    
+    try:
+        with urllib.request.urlopen(req) as resp, open(filename, "ab" if downloaded_size > 0 else "wb") as f:
+            if resp.status == 200:
+                downloaded_size = 0
+                f.seek(0)
+                f.truncate()
+
+            start_time = time.time()
+            bytes_since_start = 0
+
+            while True:
+                chunk = resp.read(1024 * 256)
+                if not chunk:
+                    break
+                f.write(chunk)
+                downloaded_size += len(chunk)
+                bytes_since_start += len(chunk)
+
+                elapsed = time.time() - start_time
+                speed = bytes_since_start / elapsed if elapsed > 0 else 0
+                
+                percent = (downloaded_size / total_size) * 100 if total_size else 0
+                remaining_bytes = total_size - downloaded_size if total_size else 0
+                eta = remaining_bytes / speed if speed > 0 else 0
+
+                bar = "=" * int(percent // 4) + ">"
+                sys.stdout.write(f"\r  [{bar:<25}] {percent:.1f}% | {downloaded_size / (1024*1024):.1f}/{total_size / (1024*1024):.1f} MB | {speed / (1024*1024):.2f} MB/s | ETA: {int(eta)}s  ")
+                sys.stdout.flush()
+
+            print("\n  Download finished.\n")
+    except Exception as e:
+        print(f"\n  Failed downloading {filename}: {e}\n")
+'
