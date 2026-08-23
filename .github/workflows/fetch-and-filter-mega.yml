@@ -7,6 +7,11 @@ on:
         description: 'MEGA Folder URL'
         required: true
         type: string
+      release_tag:
+        description: 'GitHub Release Tag/Name'
+        required: true
+        default: 'downloads'
+        type: string
 
 env:
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
@@ -30,6 +35,7 @@ jobs:
           import os, re, json, requests
 
           url = "${{ inputs.mega_url }}".strip()
+          release_tag = "${{ inputs.release_tag }}".strip()
           
           match = re.search(r"mega\.nz/(?:folder/|#F!)([^#?#]+)[#?!]([^#?&]+)", url)
           if not match:
@@ -54,12 +60,12 @@ jobs:
                   size = f.get("s")
                   filtered_items.append(f"{size}|{node_id}")
 
-          # Store the canonical folder URL on the first line
           with open("output/filtered_links.txt", "w") as out:
+              out.write(f"RELEASE_TAG|{release_tag}\n")
               out.write(f"FOLDER_URL|{canonical_folder_url}\n")
               out.write("\n".join(filtered_items))
 
-          print(f"Exported {len(filtered_items)} files larger than 100MB.")
+          print(f"Exported {len(filtered_items)} files larger than 100MB for Release: {release_tag}")
           '
 
       - name: Upload Filtered Links Artifact
