@@ -33,7 +33,7 @@ jobs:
           python3 -c '
           import os, json, requests
 
-          MAX_SIZE = 5 * 1024 * 1024 * 1024  # 5 GB
+          MAX_SIZE = 5 * 1024 * 1024 * 1024  # 5 GB Batch Limit & Single-File Cutoff
           batches = []
           current_batch = []
           current_size = 0
@@ -66,6 +66,12 @@ jobs:
                       size = int(parts[0])
                       node_id = parts[1]
 
+                      # Skip files that are individually larger than 5GB to prevent transfer quota locks
+                      if size > MAX_SIZE:
+                          print(f"Skipping node {node_id}: file size ({size} bytes) exceeds 5GB limit.")
+                          continue
+
+                      # Start a new batch if adding this file exceeds the 5GB total batch limit
                       if current_size + size > MAX_SIZE and current_batch:
                           batches.append(current_batch)
                           current_batch = []
