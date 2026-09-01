@@ -11,9 +11,6 @@ permissions:
   actions: write
   contents: write
 
-env:
-  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
-
 jobs:
   process-batches:
     runs-on: ubuntu-latest
@@ -28,7 +25,7 @@ jobs:
           run-id: ${{ github.event.workflow_run.id || github.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Group Links into ~5GB Batches & Trigger Uploads
+      - name: Group Links into ~5GB Batches & Trigger Upload Matrix
         run: |
           python3 -c '
           import os, json, requests
@@ -81,7 +78,7 @@ jobs:
                           continue
 
                       if current_size + size > MAX_SIZE and current_batch:
-                          batches.append(current_batch)
+                          batches.append(",".join(current_batch))
                           current_batch = []
                           current_size = 0
 
@@ -89,9 +86,12 @@ jobs:
                       current_size += size
 
               if current_batch:
-                  batches.append(current_batch)
+                  batches.append(",".join(current_batch))
 
           print(f"Generated {len(batches)} batches")
+
+          # Create JSON string matrix array
+          batches_json = json.dumps(batches)
 
           token = "${{ secrets.WORKFLOW_DISPATCH_TOKEN || secrets.GITHUB_TOKEN }}"
           repo = "${{ github.repository }}"
@@ -104,22 +104,16 @@ jobs:
 
           dispatch_url = f"https://api.github.com/repos/{repo}/actions/workflows/jdownloader-download-and-release.yml/dispatches"
 
-          for i, batch in enumerate(batches):
-              nodes_str = ",".join(batch)
-              # Append batch index (e.g. worker-1-batch-0) to prevent concurrency group collision and auto-cancellation
-              worker_slot = f"worker-{(i % 2) + 1}-batch-{i}"
-              
-              payload = {
-                  "ref": "main",
-                  "inputs": {
-                      "folder_url": folder_url,
-                      "node_ids": nodes_str,
-                      "target_date": target_date,
-                      "gotohp_creds_key": gotohp_creds_key,
-                      "gotohp_user_email": gotohp_user_email,
-                      "worker_slot": worker_slot
-                  }
+          payload = {
+              "ref": "main",
+              "inputs": {
+                  "folder_url": folder_url,
+                  "target_date": target_date,
+                  "gotohp_creds_key": gotohp_creds_key,
+                  "gotohp_user_email": gotohp_user_email,
+                  "batches_matrix": batches_json
               }
-              res = requests.post(dispatch_url, headers=headers, json=payload)
-              print(f"Triggered batch {i+1} on {worker_slot} status: {res.status_code}")
+          }
+          res = requests.post(dispatch_url, headers=headers, json=payload)
+          print(f"Triggered Matrix Workflow status: {res.status_code}")
           '
