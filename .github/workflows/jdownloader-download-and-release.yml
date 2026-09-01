@@ -1,1 +1,151 @@
+name: 3. Download via MEGAcmd and Upload to GotoHP CLI
 
+on:
+  workflow_dispatch:
+    inputs:
+      folder_url:
+        description: 'MEGA Folder URL'
+        required: true
+        type: string
+      target_date:
+        description: 'Timestamp to set (Format: YYYY-MM-DD hh:mm)'
+        required: true
+        type: string
+      gotohp_creds_key:
+        description: 'GotoHP Creds Key'
+        required: true
+        type: string
+      gotohp_user_email:
+        description: 'GotoHP User Email'
+        required: true
+        type: string
+      batches_matrix:
+        description: 'JSON string array of batch node IDs'
+        required: true
+        type: string
+      node_ids:
+        description: 'Fallback single batch input'
+        required: false
+        type: string
+
+jobs:
+  parse-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - id: set-matrix
+        env:
+          BATCHES_INPUT: ${{ inputs.batches_matrix }}
+          SINGLE_INPUT: ${{ inputs.node_ids }}
+        run: |
+          python3 -c '
+          import os, json
+
+          batches_raw = os.environ.get("BATCHES_INPUT", "").strip()
+          single_raw = os.environ.get("SINGLE_INPUT", "").strip()
+
+          if batches_raw:
+              matrix_data = json.loads(batches_raw)
+          elif single_raw:
+              matrix_data = [single_raw]
+          else:
+              matrix_data = []
+
+          compact_json = json.dumps(matrix_data)
+          
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"matrix={compact_json}\n")
+          '
+
+  download-process-upload:
+    needs: parse-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        batch: ${{ fromJSON(needs.parse-matrix.outputs.matrix) }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install MEGAcmd and FFmpeg
+        run: |
+          UBUNTU_VERSION=$(lsb_release -rs)
+          wget -q -P /tmp "https://mega.nz/linux/repo/xUbuntu_${UBUNTU_VERSION}/amd64/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb" 
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "/tmp/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb" ffmpeg
+          rm -f "/tmp/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb"
+
+      - name: Install gotohp-cli
+        run: |
+          curl -sL "https://github.com/xob0t/gotohp/releases/download/v0.10.0/gotohp-cli_amd64" -o /usr/local/bin/gotohp-cli
+          chmod +x /usr/local/bin/gotohp-cli
+          gotohp-cli --version || true
+
+      - name: Download Files via MEGAcmd
+        run: |
+          mkdir -p raw_downloads
+          cd raw_downloads
+
+          FOLDER_URL="${{ inputs.folder_url }}"
+          NODES=$(echo "${{ matrix.batch }}" | tr ',' ' ')
+          
+          for node_id in $NODES; do
+            NODE_URL="${FOLDER_URL}/file/${node_id}"
+            echo "Downloading file node: $NODE_URL"
+            mega-get "$NODE_URL" ./ || true
+          done
+
+      - name: Strip Metadata and Format Filename with Date, Time, and UUID
+        run: |
+          mkdir -p processed_downloads
+
+          python3 -c '
+          import os, glob, subprocess, uuid
+          from datetime import datetime, timedelta
+
+          raw_input = "${{ inputs.target_date }}".strip()
+          
+          try:
+              dt = datetime.strptime(raw_input, "%Y-%m-%d %H:%M")
+          except ValueError:
+              try:
+                  dt = datetime.strptime(raw_input, "%Y-%m-%d")
+              except ValueError:
+                  dt = datetime.now()
+
+          # Add 4 hours offset
+          adjusted_dt = dt + timedelta(hours=4)
+          
+          # Formats as YYYYMMDD_HHMMSS
+          date_prefix = adjusted_dt.strftime("%Y%m%d_%H%M%S")
+
+          raw_files = sorted(glob.glob("raw_downloads/*"))
+
+          for file_path in raw_files:
+              if os.path.isfile(file_path):
+                  ext = os.path.splitext(file_path)[1]
+                  # Generates unique hex string per file (e.g. 20260831_100000_3b1b6f04.mp4)
+                  unique_id = uuid.uuid4().hex[:8]
+                  clean_name = f"{date_prefix}_{unique_id}{ext}"
+                  out_path = os.path.join("processed_downloads", clean_name)
+                  
+                  cmd = [
+                      "ffmpeg", "-i", file_path,
+                      "-map_metadata", "-1",
+                      "-c", "copy", out_path, "-y"
+                  ]
+                  res = subprocess.run(cmd)
+                  if res.returncode != 0:
+                      subprocess.run(["cp", file_path, out_path])
+          '
+
+      - name: Configure Credentials and Upload via gotohp-cli
+        run: |
+          gotohp-cli creds add "${{ inputs.gotohp_creds_key }}"
+          gotohp-cli creds set "${{ inputs.gotohp_user_email }}"
+
+          gotohp-cli upload processed_downloads --recursive --threads 5 --date-from-filename
