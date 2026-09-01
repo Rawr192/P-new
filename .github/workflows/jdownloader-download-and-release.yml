@@ -35,12 +35,29 @@ jobs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - id: set-matrix
+        env:
+          BATCHES_INPUT: ${{ inputs.batches_matrix }}
+          SINGLE_INPUT: ${{ inputs.node_ids }}
         run: |
-          if [ -n "${{ inputs.batches_matrix }}" ]; then
-            echo "matrix=${{ inputs.batches_matrix }}" >> $GITHUB_OUTPUT
-          else
-            echo "matrix=[\"${{ inputs.node_ids }}\"]" >> $GITHUB_OUTPUT
-          fi
+          python3 -c '
+          import os, json
+
+          batches_raw = os.environ.get("BATCHES_INPUT", "").strip()
+          single_raw = os.environ.get("SINGLE_INPUT", "").strip()
+
+          if batches_raw:
+              matrix_data = json.loads(batches_raw)
+          elif single_raw:
+              matrix_data = [single_raw]
+          else:
+              matrix_data = []
+
+          # Convert to single-line minified JSON string to avoid GitHub Output parsing errors
+          compact_json = json.dumps(matrix_data)
+          
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"matrix={compact_json}\n")
+          '
 
   download-process-upload:
     needs: parse-matrix
@@ -49,7 +66,7 @@ jobs:
       max-parallel: 2
       fail-fast: false
       matrix:
-        batch: ${{ json(needs.parse-matrix.outputs.matrix) }}
+        batch: ${{ fromJSON(needs.parse-matrix.outputs.matrix) }}
 
     steps:
       - name: Checkout Repository
