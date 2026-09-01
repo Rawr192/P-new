@@ -23,6 +23,16 @@ on:
         description: 'GotoHP User Email'
         required: true
         type: string
+      worker_slot:
+        description: 'Concurrency worker slot (worker-1 or worker-2)'
+        required: false
+        default: 'worker-1'
+        type: string
+
+# Limits maximum parallel executions of Workflow 3 to 2 runs (Worker 1 and Worker 2)
+concurrency:
+  group: gotohp-upload-${{ inputs.worker_slot }}
+  cancel-in-progress: false
 
 jobs:
   download-process-upload:
