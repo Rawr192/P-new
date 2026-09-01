@@ -100,7 +100,7 @@ jobs:
             mega-get "$NODE_URL" ./ || true
           done
 
-      - name: Strip Media Metadata with FFmpeg and Touch Timestamp
+      - name: Strip Media Metadata with FFmpeg and Touch +4 Hours Timestamp
         run: |
           mkdir -p processed_downloads
 
@@ -112,8 +112,22 @@ jobs:
             fi
           done
 
-          # Update modification and access timestamps on processed files
-          touch -d "${{ inputs.target_date }}" processed_downloads/*
+          # Calculate target_date + 4 hours using Python datetime
+          OFFSET_DATE=$(python3 -c '
+          from datetime import datetime, timedelta
+          raw = "${{ inputs.target_date }}".strip()
+          try:
+              dt = datetime.strptime(raw, "%Y-%m-%d %H:%M")
+          except ValueError:
+              try:
+                  dt = datetime.strptime(raw, "%Y-%m-%d")
+              except ValueError:
+                  dt = datetime.now()
+          print((dt + timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S"))
+          ')
+
+          # Update modification and access timestamps on processed files with +4 hours offset
+          touch -d "$OFFSET_DATE" processed_downloads/*
 
       - name: Configure Credentials and Upload via gotohp-cli
         run: |
