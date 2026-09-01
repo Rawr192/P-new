@@ -1,4 +1,4 @@
-name: 3. Download via MEGAcmd and Upload to Release
+name: 3. Download via MEGAcmd and Upload to GotoHP CLI
 
 on:
   workflow_dispatch:
@@ -11,34 +11,30 @@ on:
         description: 'Comma-separated list of node IDs'
         required: true
         type: string
-      release_tag:
-        description: 'GitHub Release Tag'
+      target_date:
+        description: 'Timestamp to set via touch -d (e.g. 2026-08-31 06:00)'
         required: true
-        default: 'downloads'
         type: string
 
-permissions:
-  contents: write
-
-env:
-  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
-
 jobs:
-  download-and-release:
+  download-process-upload:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install MEGAcmd
+      - name: Install MEGAcmd and ExifTool
         run: |
           UBUNTU_VERSION=$(lsb_release -rs)
           wget -q -P /tmp "https://mega.nz/linux/repo/xUbuntu_${UBUNTU_VERSION}/amd64/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb" 
-          sudo apt-get install -y --no-install-recommends "/tmp/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "/tmp/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb" exiftool
           rm -f "/tmp/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb"
 
-      - name: Verify MEGAcmd Installation
-        run: mega-version
+      - name: Install gotohp-cli
+        run: |
+          curl -sL https://api.github.com/repos/xob0t/gotohp/releases/latest | jq -r '.assets[] | select(.name | contains("linux")) | .browser_download_url' | wget -i - -O /usr/local/bin/gotohp-cli || true
+          chmod +x /usr/local/bin/gotohp-cli
 
       - name: Download Files via MEGAcmd
         run: |
@@ -54,33 +50,22 @@ jobs:
             mega-get "$NODE_URL" ./ || true
           done
 
-      - name: Process & Split Files Exceeding 2GB Limit
+      - name: Strip Media Metadata and Touch Filesystem Timestamp
         run: |
-          mkdir -p release_assets
-          
-          for filepath in raw_downloads/*; do
-            if [ -f "$filepath" ]; then
-              filename=$(basename "$filepath")
-              filesize=$(stat -c%s "$filepath")
-              maxsize=2147483648  # 2 GB limit
+          # Strip internal EXIF/creation metadata
+          exiftool -all= -overwrite_original raw_downloads/ || true
 
-              if [ "$filesize" -gt "$maxsize" ]; then
-                echo "File $filename exceeds 2GB ($filesize bytes). Splitting into 2000M chunks..."
-                split -b 2000M -d --additional-suffix=.part "$filepath" "release_assets/${filename}."
-              else
-                cp "$filepath" release_assets/
-              fi
-            fi
-          done
+          # Update modification/access time using touch -d
+          touch -d "${{ inputs.target_date }}" raw_downloads/*
 
-      - name: Upload Assets to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.release_tag }}
-          name: ${{ inputs.release_tag }}
-          draft: false
-          prerelease: false
-          files: |
-            release_assets/*
+      - name: Configure Credentials and Upload via gotohp-cli
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GOTOHP_CREDS_KEY: ${{ secrets.GOTOHP_CREDS_KEY }}
+          GOTOHP_USER_EMAIL: ${{ secrets.GOTOHP_USER_EMAIL }}
+        run: |
+          # Register credentials
+          gotohp-cli creds add "${GOTOHP_CREDS_KEY}"
+          gotohp-cli creds set "${GOTOHP_USER_EMAIL}"
+
+          # Multi-threaded recursive upload
+          gotohp-cli upload raw_downloads --recursive --threads 5
