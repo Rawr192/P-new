@@ -7,10 +7,10 @@ on:
         description: 'MEGA Folder URL'
         required: true
         type: string
-      release_tag:
-        description: 'GitHub Release Tag/Name'
+      target_date:
+        description: 'Timestamp for touch -d (Format: YYYY-MM-DD hh:mm)'
         required: true
-        default: 'downloads'
+        default: '2026-08-31 06:00'
         type: string
 
 env:
@@ -35,7 +35,7 @@ jobs:
           import os, re, json, requests
 
           url = "${{ inputs.mega_url }}".strip()
-          release_tag = "${{ inputs.release_tag }}".strip()
+          target_date = "${{ inputs.target_date }}".strip()
           
           match = re.search(r"mega\.nz/(?:folder/|#F!)([^#?#]+)[#?!]([^#?&]+)", url)
           if not match:
@@ -61,11 +61,11 @@ jobs:
                   filtered_items.append(f"{size}|{node_id}")
 
           with open("output/filtered_links.txt", "w") as out:
-              out.write(f"RELEASE_TAG|{release_tag}\n")
+              out.write(f"TARGET_DATE|{target_date}\n")
               out.write(f"FOLDER_URL|{canonical_folder_url}\n")
               out.write("\n".join(filtered_items))
 
-          print(f"Exported {len(filtered_items)} files larger than 100MB for Release: {release_tag}")
+          print(f"Exported {len(filtered_items)} files larger than 100MB")
           '
 
       - name: Upload Filtered Links Artifact
