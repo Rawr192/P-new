@@ -106,8 +106,8 @@ jobs:
 
           for i, batch in enumerate(batches):
               nodes_str = ",".join(batch)
-              # Assign worker-1 or worker-2 alternatingly to keep concurrency strictly at 2
-              worker_slot = f"worker-{(i % 2) + 1}"
+              # Append batch index (e.g. worker-1-batch-0) to prevent concurrency group collision and auto-cancellation
+              worker_slot = f"worker-{(i % 2) + 1}-batch-{i}"
               
               payload = {
                   "ref": "main",
