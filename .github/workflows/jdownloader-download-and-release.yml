@@ -12,7 +12,15 @@ on:
         required: true
         type: string
       target_date:
-        description: 'Timestamp to set via touch -d (e.g. 2026-08-31 06:00)'
+        description: 'Timestamp to set via touch -d'
+        required: true
+        type: string
+      gotohp_creds_key:
+        description: 'GotoHP Creds Key'
+        required: true
+        type: string
+      gotohp_user_email:
+        description: 'GotoHP User Email'
         required: true
         type: string
 
@@ -59,13 +67,10 @@ jobs:
           touch -d "${{ inputs.target_date }}" raw_downloads/*
 
       - name: Configure Credentials and Upload via gotohp-cli
-        env:
-          GOTOHP_CREDS_KEY: ${{ secrets.GOTOHP_CREDS_KEY }}
-          GOTOHP_USER_EMAIL: ${{ secrets.GOTOHP_USER_EMAIL }}
         run: |
-          # Register credentials
-          gotohp-cli creds add "${GOTOHP_CREDS_KEY}"
-          gotohp-cli creds set "${GOTOHP_USER_EMAIL}"
+          # Register credentials passed directly from input
+          gotohp-cli creds add "${{ inputs.gotohp_creds_key }}"
+          gotohp-cli creds set "${{ inputs.gotohp_user_email }}"
 
           # Multi-threaded recursive upload
           gotohp-cli upload raw_downloads --recursive --threads 5
