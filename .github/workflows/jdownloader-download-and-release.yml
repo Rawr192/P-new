@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       target_date:
-        description: 'Timestamp to set via touch -d'
+        description: 'Timestamp to set (Format: YYYY-MM-DD hh:mm)'
         required: true
         type: string
       gotohp_creds_key:
@@ -52,7 +52,6 @@ jobs:
           else:
               matrix_data = []
 
-          # Convert to single-line minified JSON string to avoid GitHub Output parsing errors
           compact_json = json.dumps(matrix_data)
           
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
@@ -100,40 +99,55 @@ jobs:
             mega-get "$NODE_URL" ./ || true
           done
 
-      - name: Strip Media Metadata with FFmpeg and Touch +4 Hours Timestamp
+      - name: Strip Metadata and Format Filename with Date and Time
         run: |
           mkdir -p processed_downloads
 
-          # Strip metadata streams without re-encoding video/audio (-c copy)
-          for file in raw_downloads/*; do
-            if [ -f "$file" ]; then
-              filename=$(basename "$file")
-              ffmpeg -i "$file" -map_metadata -1 -c copy "processed_downloads/$filename" -y || mv "$file" "processed_downloads/$filename"
-            fi
-          done
-
-          # Calculate target_date + 4 hours using Python datetime
-          OFFSET_DATE=$(python3 -c '
+          python3 -c '
+          import os, glob, subprocess
           from datetime import datetime, timedelta
-          raw = "${{ inputs.target_date }}".strip()
+
+          raw_input = "${{ inputs.target_date }}".strip()
+          
           try:
-              dt = datetime.strptime(raw, "%Y-%m-%d %H:%M")
+              dt = datetime.strptime(raw_input, "%Y-%m-%d %H:%M")
           except ValueError:
               try:
-                  dt = datetime.strptime(raw, "%Y-%m-%d")
+                  dt = datetime.strptime(raw_input, "%Y-%m-%d")
               except ValueError:
                   dt = datetime.now()
-          print((dt + timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S"))
-          ')
 
-          # Update modification and access timestamps on processed files with +4 hours offset
-          touch -d "$OFFSET_DATE" processed_downloads/*
+          # Add 4 hours offset
+          adjusted_dt = dt + timedelta(hours=4)
+          
+          # Formats as YYYYMMDD_HHMMSS
+          date_prefix = adjusted_dt.strftime("%Y%m%d_%H%M%S")
+
+          raw_files = sorted(glob.glob("raw_downloads/*"))
+          counter = 1
+
+          for file_path in raw_files:
+              if os.path.isfile(file_path):
+                  ext = os.path.splitext(file_path)[1]
+                  # Result format: 20240709_182027-1.mp4
+                  clean_name = f"{date_prefix}-{counter}{ext}"
+                  out_path = os.path.join("processed_downloads", clean_name)
+                  
+                  cmd = [
+                      "ffmpeg", "-i", file_path,
+                      "-map_metadata", "-1",
+                      "-c", "copy", out_path, "-y"
+                  ]
+                  res = subprocess.run(cmd)
+                  if res.returncode != 0:
+                      subprocess.run(["cp", file_path, out_path])
+                  
+                  counter += 1
+          '
 
       - name: Configure Credentials and Upload via gotohp-cli
         run: |
-          # Register credentials passed directly from input
           gotohp-cli creds add "${{ inputs.gotohp_creds_key }}"
           gotohp-cli creds set "${{ inputs.gotohp_user_email }}"
 
-          # Multi-threaded recursive upload of processed directory
-          gotohp-cli upload processed_downloads --recursive --threads 5
+          gotohp-cli upload processed_downloads --recursive --threads 5 --date-from-filename
