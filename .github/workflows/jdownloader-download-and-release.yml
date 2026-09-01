@@ -41,34 +41,8 @@ jobs:
 
       - name: Install gotohp-cli
         run: |
-          # Fetch release info with proper headers
-          RELEASE_JSON=$(curl -sH "User-Agent: GitHubActions" https://api.github.com/repos/xob0t/gotohp/releases/latest)
-
-          # Case-insensitive search for the Linux asset download URL
-          DOWNLOAD_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[]? | select(.name | ascii_downcase | contains("linux")) | .browser_download_url' | head -n 1)
-
-          if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-            echo "Failed to locate Linux binary asset in GitHub Release."
-            exit 1
-          fi
-
-          echo "Downloading gotohp-cli from: $DOWNLOAD_URL"
-          mkdir -p /tmp/gotohp
-          curl -sL "$DOWNLOAD_URL" -o /tmp/gotohp/asset
-
-          # Unpack dynamic asset type (archive vs raw executable)
-          if file /tmp/gotohp/asset | grep -q 'Zip archive'; then
-            unzip -o /tmp/gotohp/asset -d /tmp/gotohp/
-            find /tmp/gotohp -type f ! -name "*.zip" -exec mv {} /usr/local/bin/gotohp-cli \;
-          elif file /tmp/gotohp/asset | grep -q 'gzip compressed'; then
-            tar -xzf /tmp/gotohp/asset -C /tmp/gotohp/
-            find /tmp/gotohp -type f ! -name "*.tar.gz" -exec mv {} /usr/local/bin/gotohp-cli \;
-          else
-            mv /tmp/gotohp/asset /usr/local/bin/gotohp-cli
-          fi
-
+          curl -sL "https://github.com/xob0t/gotohp/releases/download/v0.10.0/gotohp-cli_amd64" -o /usr/local/bin/gotohp-cli
           chmod +x /usr/local/bin/gotohp-cli
-          rm -rf /tmp/gotohp
           gotohp-cli --version || true
 
       - name: Download Files via MEGAcmd
