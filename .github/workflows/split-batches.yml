@@ -28,17 +28,17 @@ jobs:
           run-id: ${{ github.event.workflow_run.id || github.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Group Links into ~5GB Batches & Trigger Downloads
+      - name: Group Links into ~5GB Batches & Trigger Uploads
         run: |
           python3 -c '
           import os, json, requests
 
-          MAX_SIZE = 5 * 1024 * 1024 * 1024  # 5 GB Batch Limit & Single-File Cutoff
+          MAX_SIZE = 5 * 1024 * 1024 * 1024  # 5 GB limit
           batches = []
           current_batch = []
           current_size = 0
           folder_url = ""
-          target_release = "downloads"
+          target_date = ""
 
           file_path = "filtered_links.txt"
           if not os.path.exists(file_path):
@@ -53,9 +53,9 @@ jobs:
                       line = line.strip()
                       if not line:
                           continue
-                      
-                      if line.startswith("RELEASE_TAG|"):
-                          target_release = line.split("|", 1)[1]
+
+                      if line.startswith("TARGET_DATE|"):
+                          target_date = line.split("|", 1)[1]
                           continue
 
                       if line.startswith("FOLDER_URL|"):
@@ -66,12 +66,10 @@ jobs:
                       size = int(parts[0])
                       node_id = parts[1]
 
-                      # Skip files that are individually larger than 5GB to prevent transfer quota locks
                       if size > MAX_SIZE:
                           print(f"Skipping node {node_id}: file size ({size} bytes) exceeds 5GB limit.")
                           continue
 
-                      # Start a new batch if adding this file exceeds the 5GB total batch limit
                       if current_size + size > MAX_SIZE and current_batch:
                           batches.append(current_batch)
                           current_batch = []
@@ -83,7 +81,7 @@ jobs:
               if current_batch:
                   batches.append(current_batch)
 
-          print(f"Generated {len(batches)} batches targeting Release: \"{target_release}\"")
+          print(f"Generated {len(batches)} batches")
 
           token = "${{ secrets.WORKFLOW_DISPATCH_TOKEN || secrets.GITHUB_TOKEN }}"
           repo = "${{ github.repository }}"
@@ -94,23 +92,6 @@ jobs:
               "X-GitHub-Api-Version": "2022-11-28"
           }
 
-          # 1. Ensure target release exists
-          release_url = f"https://api.github.com/repos/{repo}/releases/tags/{target_release}"
-          check_res = requests.get(release_url, headers=headers)
-
-          if check_res.status_code == 404:
-              print(f"Creating missing release: {target_release}")
-              create_url = f"https://api.github.com/repos/{repo}/releases"
-              release_payload = {
-                  "tag_name": target_release,
-                  "name": target_release,
-                  "body": "Centralized release containing all downloaded batch files.",
-                  "draft": False,
-                  "prerelease": False
-              }
-              requests.post(create_url, headers=headers, json=release_payload)
-
-          # 2. Trigger Workflow 3 for each batch
           dispatch_url = f"https://api.github.com/repos/{repo}/actions/workflows/jdownloader-download-and-release.yml/dispatches"
 
           for i, batch in enumerate(batches):
@@ -120,7 +101,7 @@ jobs:
                   "inputs": {
                       "folder_url": folder_url,
                       "node_ids": nodes_str,
-                      "release_tag": target_release
+                      "target_date": target_date
                   }
               }
               res = requests.post(dispatch_url, headers=headers, json=payload)
