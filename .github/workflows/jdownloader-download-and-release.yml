@@ -7,10 +7,6 @@ on:
         description: 'MEGA Folder URL'
         required: true
         type: string
-      node_ids:
-        description: 'Comma-separated list of node IDs'
-        required: true
-        type: string
       target_date:
         description: 'Timestamp to set via touch -d'
         required: true
@@ -23,20 +19,38 @@ on:
         description: 'GotoHP User Email'
         required: true
         type: string
-      worker_slot:
-        description: 'Concurrency worker slot (worker-1 or worker-2)'
+      batches_matrix:
+        description: 'JSON string array of batch node IDs'
+        required: true
+        type: string
+      node_ids:
+        description: 'Fallback single batch input'
         required: false
-        default: 'worker-1'
         type: string
 
-# Limits maximum parallel executions of Workflow 3 to 2 runs (Worker 1 and Worker 2)
-concurrency:
-  group: gotohp-upload-${{ inputs.worker_slot }}
-  cancel-in-progress: false
-
 jobs:
-  download-process-upload:
+  parse-matrix:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - id: set-matrix
+        run: |
+          if [ -n "${{ inputs.batches_matrix }}" ]; then
+            echo "matrix=${{ inputs.batches_matrix }}" >> $GITHUB_OUTPUT
+          else
+            echo "matrix=[\"${{ inputs.node_ids }}\"]" >> $GITHUB_OUTPUT
+          fi
+
+  download-process-upload:
+    needs: parse-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        batch: ${{ json(needs.parse-matrix.outputs.matrix) }}
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -61,7 +75,7 @@ jobs:
           cd raw_downloads
 
           FOLDER_URL="${{ inputs.folder_url }}"
-          NODES=$(echo "${{ inputs.node_ids }}" | tr ',' ' ')
+          NODES=$(echo "${{ matrix.batch }}" | tr ',' ' ')
           
           for node_id in $NODES; do
             NODE_URL="${FOLDER_URL}/file/${node_id}"
