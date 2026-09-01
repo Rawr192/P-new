@@ -41,12 +41,12 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install MEGAcmd and ExifTool
+      - name: Install MEGAcmd and FFmpeg
         run: |
           UBUNTU_VERSION=$(lsb_release -rs)
           wget -q -P /tmp "https://mega.nz/linux/repo/xUbuntu_${UBUNTU_VERSION}/amd64/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb" 
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends "/tmp/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb" exiftool
+          sudo apt-get install -y --no-install-recommends "/tmp/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb" ffmpeg
           rm -f "/tmp/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb"
 
       - name: Install gotohp-cli
@@ -69,13 +69,20 @@ jobs:
             mega-get "$NODE_URL" ./ || true
           done
 
-      - name: Strip Media Metadata and Touch Filesystem Timestamp
+      - name: Strip Media Metadata with FFmpeg and Touch Timestamp
         run: |
-          # Strip internal EXIF/creation metadata
-          exiftool -all= -overwrite_original raw_downloads/ || true
+          mkdir -p processed_downloads
 
-          # Update modification/access time using touch -d
-          touch -d "${{ inputs.target_date }}" raw_downloads/*
+          # Strip metadata streams without re-encoding video/audio (-c copy)
+          for file in raw_downloads/*; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              ffmpeg -i "$file" -map_metadata -1 -c copy "processed_downloads/$filename" -y || mv "$file" "processed_downloads/$filename"
+            fi
+          done
+
+          # Update modification and access timestamps on processed files
+          touch -d "${{ inputs.target_date }}" processed_downloads/*
 
       - name: Configure Credentials and Upload via gotohp-cli
         run: |
@@ -83,5 +90,5 @@ jobs:
           gotohp-cli creds add "${{ inputs.gotohp_creds_key }}"
           gotohp-cli creds set "${{ inputs.gotohp_user_email }}"
 
-          # Multi-threaded recursive upload
-          gotohp-cli upload raw_downloads --recursive --threads 5
+          # Multi-threaded recursive upload of processed directory
+          gotohp-cli upload processed_downloads --recursive --threads 5
