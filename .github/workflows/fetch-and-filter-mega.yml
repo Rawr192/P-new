@@ -12,6 +12,14 @@ on:
         required: true
         default: '2026-08-31 06:00'
         type: string
+      gotohp_creds_key:
+        description: 'GotoHP Creds Key (e.g. androidId=...)'
+        required: true
+        type: string
+      gotohp_user_email:
+        description: 'GotoHP User Email'
+        required: true
+        type: string
 
 env:
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
@@ -36,6 +44,8 @@ jobs:
 
           url = "${{ inputs.mega_url }}".strip()
           target_date = "${{ inputs.target_date }}".strip()
+          creds_key = "${{ inputs.gotohp_creds_key }}".strip()
+          user_email = "${{ inputs.gotohp_user_email }}".strip()
           
           match = re.search(r"mega\.nz/(?:folder/|#F!)([^#?#]+)[#?!]([^#?&]+)", url)
           if not match:
@@ -62,6 +72,8 @@ jobs:
 
           with open("output/filtered_links.txt", "w") as out:
               out.write(f"TARGET_DATE|{target_date}\n")
+              out.write(f"GOTOHP_CREDS_KEY|{creds_key}\n")
+              out.write(f"GOTOHP_USER_EMAIL|{user_email}\n")
               out.write(f"FOLDER_URL|{canonical_folder_url}\n")
               out.write("\n".join(filtered_items))
 
