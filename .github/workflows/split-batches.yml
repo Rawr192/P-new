@@ -39,6 +39,8 @@ jobs:
           current_size = 0
           folder_url = ""
           target_date = ""
+          gotohp_creds_key = ""
+          gotohp_user_email = ""
 
           file_path = "filtered_links.txt"
           if not os.path.exists(file_path):
@@ -56,6 +58,14 @@ jobs:
 
                       if line.startswith("TARGET_DATE|"):
                           target_date = line.split("|", 1)[1]
+                          continue
+
+                      if line.startswith("GOTOHP_CREDS_KEY|"):
+                          gotohp_creds_key = line.split("|", 1)[1]
+                          continue
+
+                      if line.startswith("GOTOHP_USER_EMAIL|"):
+                          gotohp_user_email = line.split("|", 1)[1]
                           continue
 
                       if line.startswith("FOLDER_URL|"):
@@ -101,7 +111,9 @@ jobs:
                   "inputs": {
                       "folder_url": folder_url,
                       "node_ids": nodes_str,
-                      "target_date": target_date
+                      "target_date": target_date,
+                      "gotohp_creds_key": gotohp_creds_key,
+                      "gotohp_user_email": gotohp_user_email
                   }
               }
               res = requests.post(dispatch_url, headers=headers, json=payload)
