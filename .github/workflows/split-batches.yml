@@ -1,77 +1,125 @@
-name: 3. Download via MEGAcmd and Upload to GotoHP CLI
+name: 2. Split Links into 5GB Batches
 
 on:
   workflow_dispatch:
-    inputs:
-      folder_url:
-        description: 'MEGA Folder URL'
-        required: true
-        type: string
-      node_ids:
-        description: 'Comma-separated list of node IDs'
-        required: true
-        type: string
-      target_date:
-        description: 'Timestamp to set via touch -d'
-        required: true
-        type: string
-      gotohp_creds_key:
-        description: 'GotoHP Creds Key'
-        required: true
-        type: string
-      gotohp_user_email:
-        description: 'GotoHP User Email'
-        required: true
-        type: string
+  workflow_run:
+    workflows: ["1. Fetch and Filter MEGA Links"]
+    types:
+      - completed
+
+permissions:
+  actions: write
+  contents: write
+
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
 
 jobs:
-  download-process-upload:
+  process-batches:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install MEGAcmd and ExifTool
-        run: |
-          UBUNTU_VERSION=$(lsb_release -rs)
-          wget -q -P /tmp "https://mega.nz/linux/repo/xUbuntu_${UBUNTU_VERSION}/amd64/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb" 
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends "/tmp/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb" exiftool
-          rm -f "/tmp/megacmd-xUbuntu_${UBUNTU_VERSION}_amd64.deb"
+      - name: Download Filtered Links
+        uses: actions/download-artifact@v4
+        with:
+          name: mega-filtered-links
+          run-id: ${{ github.event.workflow_run.id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install gotohp-cli
+      - name: Group Links into ~5GB Batches & Trigger Uploads
         run: |
-          curl -sL "https://github.com/xob0t/gotohp/releases/download/v0.10.0/gotohp-cli_amd64" -o /usr/local/bin/gotohp-cli
-          chmod +x /usr/local/bin/gotohp-cli
-          gotohp-cli --version || true
+          python3 -c '
+          import os, json, requests
 
-      - name: Download Files via MEGAcmd
-        run: |
-          mkdir -p raw_downloads
-          cd raw_downloads
+          MAX_SIZE = 5 * 1024 * 1024 * 1024  # 5 GB limit
+          batches = []
+          current_batch = []
+          current_size = 0
+          folder_url = ""
+          target_date = ""
+          gotohp_creds_key = ""
+          gotohp_user_email = ""
 
-          FOLDER_URL="${{ inputs.folder_url }}"
-          NODES=$(echo "${{ inputs.node_ids }}" | tr ',' ' ')
+          file_path = "filtered_links.txt"
+          if not os.path.exists(file_path):
+              for root, dirs, files in os.walk("."):
+                  if "filtered_links.txt" in files:
+                      file_path = os.path.join(root, "filtered_links.txt")
+                      break
+
+          if os.path.exists(file_path):
+              with open(file_path, "r") as f:
+                  for line in f:
+                      line = line.strip()
+                      if not line:
+                          continue
+
+                      if line.startswith("TARGET_DATE|"):
+                          target_date = line.split("|", 1)[1]
+                          continue
+
+                      if line.startswith("GOTOHP_CREDS_KEY|"):
+                          gotohp_creds_key = line.split("|", 1)[1]
+                          continue
+
+                      if line.startswith("GOTOHP_USER_EMAIL|"):
+                          gotohp_user_email = line.split("|", 1)[1]
+                          continue
+
+                      if line.startswith("FOLDER_URL|"):
+                          folder_url = line.split("|", 1)[1]
+                          continue
+
+                      parts = line.split("|")
+                      size = int(parts[0])
+                      node_id = parts[1]
+
+                      if size > MAX_SIZE:
+                          print(f"Skipping node {node_id}: file size ({size} bytes) exceeds 5GB limit.")
+                          continue
+
+                      if current_size + size > MAX_SIZE and current_batch:
+                          batches.append(current_batch)
+                          current_batch = []
+                          current_size = 0
+
+                      current_batch.append(node_id)
+                      current_size += size
+
+              if current_batch:
+                  batches.append(current_batch)
+
+          print(f"Generated {len(batches)} batches")
+
+          token = "${{ secrets.WORKFLOW_DISPATCH_TOKEN || secrets.GITHUB_TOKEN }}"
+          repo = "${{ github.repository }}"
           
-          for node_id in $NODES; do
-            NODE_URL="${FOLDER_URL}/file/${node_id}"
-            echo "Downloading file node: $NODE_URL"
-            mega-get "$NODE_URL" ./ || true
-          done
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28"
+          }
 
-      - name: Strip Media Metadata and Touch Filesystem Timestamp
-        run: |
-          # Strip internal EXIF/creation metadata
-          exiftool -all= -overwrite_original raw_downloads/ || true
+          dispatch_url = f"https://api.github.com/repos/{repo}/actions/workflows/jdownloader-download-and-release.yml/dispatches"
 
-          # Update modification/access time using touch -d
-          touch -d "${{ inputs.target_date }}" raw_downloads/*
-
-      - name: Configure Credentials and Upload via gotohp-cli
-        run: |
-          # Register credentials passed directly from input
-          gotohp-cli creds add "${{ inputs.gotohp_creds_key }}"
-          gotohp-cli creds set "${{ inputs.gotohp_user_email }}"
-
-          # Multi-threaded recursive upload
-          gotohp-cli upload raw_downloads --recursive --threads 5
+          for i, batch in enumerate(batches):
+              nodes_str = ",".join(batch)
+              # Assign worker-1 or worker-2 alternatingly to keep concurrency strictly at 2
+              worker_slot = f"worker-{(i % 2) + 1}"
+              
+              payload = {
+                  "ref": "main",
+                  "inputs": {
+                      "folder_url": folder_url,
+                      "node_ids": nodes_str,
+                      "target_date": target_date,
+                      "gotohp_creds_key": gotohp_creds_key,
+                      "gotohp_user_email": gotohp_user_email,
+                      "worker_slot": worker_slot
+                  }
+              }
+              res = requests.post(dispatch_url, headers=headers, json=payload)
+              print(f"Triggered batch {i+1} on {worker_slot} status: {res.status_code}")
+          '
