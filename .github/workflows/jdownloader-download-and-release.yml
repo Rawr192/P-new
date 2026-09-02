@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       target_date:
-        description: 'Timestamp to set (Format: YYYY-MM-DD hh:mm)'
+        description: 'Timestamp to set (Format: YYYY-MM-DD)'
         required: true
         type: string
       gotohp_creds_key:
@@ -99,7 +99,9 @@ jobs:
             mega-get "$NODE_URL" ./ || true
           done
 
-      - name: Strip Metadata and Format Filename with Date, Time, and UUID
+      - name: Strip Metadata and Rename Files (Fixed to 06:00 + Offset)
+        env:
+          TZ: "UTC"
         run: |
           mkdir -p processed_downloads
 
@@ -110,27 +112,22 @@ jobs:
           raw_input = "${{ inputs.target_date }}".strip()
           
           try:
-              dt = datetime.strptime(raw_input, "%Y-%m-%d %H:%M")
+              base_date = datetime.strptime(raw_input, "%Y-%m-%d")
           except ValueError:
-              try:
-                  dt = datetime.strptime(raw_input, "%Y-%m-%d")
-              except ValueError:
-                  dt = datetime.now()
+              base_date = datetime.utcnow()
 
-          # Add 4 hours offset
-          adjusted_dt = dt + timedelta(hours=4)
-          
-          # Formats as YYYYMMDD_HHMMSS
-          date_prefix = adjusted_dt.strftime("%Y%m%d_%H%M%S")
+          # Set fixed time at 06:00:00 + 4 hours offset = 10:00:00
+          current_dt = base_date.replace(hour=6, minute=0, second=0) + timedelta(hours=4)
 
           raw_files = sorted(glob.glob("raw_downloads/*"))
 
           for file_path in raw_files:
               if os.path.isfile(file_path):
                   ext = os.path.splitext(file_path)[1]
-                  # Generates unique hex string per file (e.g. 20260831_100000_3b1b6f04.mp4)
+                  
+                  timestamp_str = current_dt.strftime("%Y%m%d_%H%M%S")
                   unique_id = uuid.uuid4().hex[:8]
-                  clean_name = f"{date_prefix}_{unique_id}{ext}"
+                  clean_name = f"{timestamp_str}_{unique_id}{ext}"
                   out_path = os.path.join("processed_downloads", clean_name)
                   
                   cmd = [
@@ -141,6 +138,9 @@ jobs:
                   res = subprocess.run(cmd)
                   if res.returncode != 0:
                       subprocess.run(["cp", file_path, out_path])
+
+                  # Increment by 1 second per file to ensure order and uniqueness
+                  current_dt += timedelta(seconds=1)
           '
 
       - name: Configure Credentials and Upload via gotohp-cli
@@ -148,4 +148,4 @@ jobs:
           gotohp-cli creds add "${{ inputs.gotohp_creds_key }}"
           gotohp-cli creds set "${{ inputs.gotohp_user_email }}"
 
-          gotohp-cli upload processed_downloads --recursive --threads 5 --date-from-filename
+          gotohp-cli upload processed_downloads --recursive --threads 5 --date-from-filename --force --no-tui
