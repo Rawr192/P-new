@@ -99,14 +99,14 @@ jobs:
             mega-get "$NODE_URL" ./ || true
           done
 
-      - name: Strip Metadata and Rename Files (Fixed to 06:00 + Offset)
+      - name: Deep Metadata Strip and Touch Original Filenames
         env:
           TZ: "UTC"
         run: |
           mkdir -p processed_downloads
 
           python3 -c '
-          import os, glob, subprocess, uuid
+          import os, glob, subprocess
           from datetime import datetime, timedelta
 
           raw_input = "${{ inputs.target_date }}".strip()
@@ -116,30 +116,38 @@ jobs:
           except ValueError:
               base_date = datetime.utcnow()
 
-          # Set fixed time at 06:00:00 + 4 hours offset = 10:00:00
+          # Base time at 06:00:00 + 4 hours offset = 10:00:00 UTC
           current_dt = base_date.replace(hour=6, minute=0, second=0) + timedelta(hours=4)
 
           raw_files = sorted(glob.glob("raw_downloads/*"))
 
           for file_path in raw_files:
               if os.path.isfile(file_path):
-                  ext = os.path.splitext(file_path)[1]
+                  # Preserve original filename
+                  orig_filename = os.path.basename(file_path)
+                  out_path = os.path.join("processed_downloads", orig_filename)
                   
-                  timestamp_str = current_dt.strftime("%Y%m%d_%H%M%S")
-                  unique_id = uuid.uuid4().hex[:8]
-                  clean_name = f"{timestamp_str}_{unique_id}{ext}"
-                  out_path = os.path.join("processed_downloads", clean_name)
-                  
+                  # 1. Deep strip container and stream level metadata using ffmpeg
                   cmd = [
                       "ffmpeg", "-i", file_path,
                       "-map_metadata", "-1",
-                      "-c", "copy", out_path, "-y"
+                      "-map_metadata:s:v", "-1",
+                      "-map_metadata:s:a", "-1",
+                      "-c", "copy",
+                      "-fflags", "+bitexact",
+                      out_path, "-y"
                   ]
                   res = subprocess.run(cmd)
                   if res.returncode != 0:
                       subprocess.run(["cp", file_path, out_path])
 
-                  # Increment by 1 second per file to ensure order and uniqueness
+                  # 2. Format timestamp string for touch command (YYYYMMDDhhmm.ss)
+                  touch_time_str = current_dt.strftime("%Y%m%d%H%M.%S")
+                  
+                  # 3. Execute touch directly AFTER ffmpeg creates the processed file
+                  subprocess.run(["touch", "-m", "-t", touch_time_str, out_path])
+
+                  # Increment time by 1 second for each file
                   current_dt += timedelta(seconds=1)
           '
 
@@ -148,4 +156,4 @@ jobs:
           gotohp-cli creds add "${{ inputs.gotohp_creds_key }}"
           gotohp-cli creds set "${{ inputs.gotohp_user_email }}"
 
-          gotohp-cli upload processed_downloads --recursive --threads 5 --date-from-filename --force --no-tui
+          gotohp-cli upload processed_downloads --recursive --threads 5 --force --no-tui
