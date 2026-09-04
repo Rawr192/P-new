@@ -99,43 +99,55 @@ jobs:
             mega-get "$NODE_URL" ./ || true
           done
 
-      - name: Deep Metadata Strip and Touch Original Filenames (Pure Bash)
-        env:
-          TZ: "UTC"
+      - name: Deep Metadata Strip and Touch Original Filenames (Python)
         run: |
           mkdir -p processed_downloads
 
-          # 1. Parse target date and initialize base Epoch timestamp (06:00:00 + 4 hours offset = 10:00:00 UTC)
-          TARGET_DATE="${{ inputs.target_date }}"
-          BASE_EPOCH=$(date -u -d "${TARGET_DATE} 10:00:00" +%s)
+          python3 -c '
+          import os, glob, subprocess
+          from datetime import datetime, timedelta
 
-          CURRENT_EPOCH=$BASE_EPOCH
+          raw_input = "${{ inputs.target_date }}".strip()
+          
+          # Clean parse YYYY-MM-DD
+          try:
+              base_date = datetime.strptime(raw_input, "%Y-%m-%d")
+          except ValueError:
+              base_date = datetime.utcnow()
 
-          # 2. Loop through raw downloads using null-terminated file streams to handle special characters cleanly
-          find raw_downloads -mindepth 1 -maxdepth 1 -type f -print0 | sort -z | while IFS= read -r -d '' file_path; do
-            orig_filename=$(basename "$file_path")
-            out_path="processed_downloads/$orig_filename"
+          # Set strict target time: 06:00:00 + 4 hours offset = 10:00:00
+          current_dt = base_date.replace(hour=6, minute=0, second=0) + timedelta(hours=4)
 
-            echo "Processing: $orig_filename"
+          raw_files = sorted(glob.glob("raw_downloads/*"))
 
-            # 3. Deep strip container and stream-level metadata via ffmpeg
-            ffmpeg -i "$file_path" \
-              -map_metadata -1 \
-              -map_metadata:s:v -1 \
-              -map_metadata:s:a -1 \
-              -c copy \
-              -fflags +bitexact \
-              "$out_path" -y || cp "$file_path" "$out_path"
+          for file_path in raw_files:
+              if os.path.isfile(file_path):
+                  orig_filename = os.path.basename(file_path)
+                  out_path = os.path.join("processed_downloads", orig_filename)
+                  
+                  # 1. Deep strip container and stream metadata
+                  cmd = [
+                      "ffmpeg", "-i", file_path,
+                      "-map_metadata", "-1",
+                      "-map_metadata:s:v", "-1",
+                      "-map_metadata:s:a", "-1",
+                      "-c", "copy",
+                      "-fflags", "+bitexact",
+                      out_path, "-y"
+                  ]
+                  res = subprocess.run(cmd)
+                  if res.returncode != 0:
+                      subprocess.run(["cp", file_path, out_path])
 
-            # 4. Format ISO date string directly from Epoch counter
-            TOUCH_DATE=$(date -u -d "@$CURRENT_EPOCH" "+%Y-%m-%d %H:%M:%S")
+                  # 2. Format strict ISO date string: "YYYY-MM-DD HH:MM:SS"
+                  touch_time_str = current_dt.strftime("%Y-%m-%d %H:%M:%S")
+                  
+                  # 3. Apply touch -d using only the specified date string
+                  subprocess.run(["touch", "-d", touch_time_str, out_path], check=True)
 
-            # 5. Apply touch -d directly after FFmpeg generates the processed output file
-            touch -m -d "$TOUCH_DATE" "$out_path"
-
-            # 6. Increment epoch time by 1 second per file
-            CURRENT_EPOCH=$((CURRENT_EPOCH + 1))
-          done
+                  # Increment per file by 1 second
+                  current_dt += timedelta(seconds=1)
+          '
 
       - name: Verify Processed Files and Modification Timestamps
         run: |
