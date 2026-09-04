@@ -28,6 +28,9 @@ on:
         required: false
         type: string
 
+env:
+  TZ: "Europe/Oslo"
+
 jobs:
   parse-matrix:
     runs-on: ubuntu-latest
@@ -99,7 +102,7 @@ jobs:
             mega-get "$NODE_URL" ./ || true
           done
 
-      - name: Deep Metadata Strip and Touch Original Filenames (Python)
+      - name: Inject Norway Metadata and Set Timestamp (Python)
         run: |
           mkdir -p processed_downloads
 
@@ -109,7 +112,6 @@ jobs:
 
           raw_input = "${{ inputs.target_date }}".strip()
           
-          # Flexible parsing for YYYY-MM-DD HH:MM:SS, YYYY-MM-DD HH:MM, or YYYY-MM-DD
           base_date = None
           matched_fmt = None
           for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
@@ -123,7 +125,6 @@ jobs:
           if base_date is None:
               base_date = datetime.utcnow().replace(hour=13, minute=0, second=0)
           elif matched_fmt == "%Y-%m-%d":
-              # Default time to 13:00 if date only is provided
               base_date = base_date.replace(hour=13, minute=0, second=0)
 
           current_dt = base_date
@@ -134,12 +135,15 @@ jobs:
                   orig_filename = os.path.basename(file_path)
                   out_path = os.path.join("processed_downloads", orig_filename)
                   
-                  # 1. Deep strip container and stream level metadata
+                  # Format ISO string with offset and inject location metadata
+                  iso_creation_time = current_dt.strftime("%Y-%m-%dT%H:%M:%S") + "+02:00"
+
                   cmd = [
                       "ffmpeg", "-i", file_path,
                       "-map_metadata", "-1",
-                      "-map_metadata:s:v", "-1",
-                      "-map_metadata:s:a", "-1",
+                      "-metadata", f"creation_time={iso_creation_time}",
+                      "-metadata", "location=59.9139+10.7522/",
+                      "-metadata", "location-eng=Norway",
                       "-c", "copy",
                       "-fflags", "+bitexact",
                       out_path, "-y"
@@ -148,19 +152,15 @@ jobs:
                   if res.returncode != 0:
                       subprocess.run(["cp", file_path, out_path])
 
-                  # 2. Format ISO date string with explicit CEST Norway offset (+02:00)
-                  touch_time_str = current_dt.strftime("%Y-%m-%d %H:%M:%S") + " +02:00"
-                  
-                  # 3. Apply touch -d directly to the output file
+                  touch_time_str = current_dt.strftime("%Y-%m-%d %H:%M:%S")
                   subprocess.run(["touch", "-d", touch_time_str, out_path], check=True)
 
-                  # Increment time by 1 second for each file to preserve sequence
                   current_dt += timedelta(seconds=1)
           '
 
       - name: Verify Processed Files and Modification Timestamps
         run: |
-          echo "=== VERIFYING PROCESSED FILES ==="
+          echo "=== VERIFYING PROCESSED FILES (NORWAY TIME) ==="
           ls -la --time-style=full-iso processed_downloads/
 
       - name: Configure Credentials and Upload via gotohp-cli
