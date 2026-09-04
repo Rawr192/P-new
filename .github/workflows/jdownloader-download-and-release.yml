@@ -115,8 +115,8 @@ jobs:
           except ValueError:
               base_date = datetime.utcnow()
 
-          # Set strict target time: 06:00:00 + 4 hours offset = 10:00:00
-          current_dt = base_date.replace(hour=6, minute=0, second=0) + timedelta(hours=4)
+          # Set target time directly to 13:00:00
+          current_dt = base_date.replace(hour=13, minute=0, second=0)
 
           raw_files = sorted(glob.glob("raw_downloads/*"))
 
@@ -139,10 +139,10 @@ jobs:
                   if res.returncode != 0:
                       subprocess.run(["cp", file_path, out_path])
 
-                  # 2. Format strict ISO date string: "YYYY-MM-DD HH:MM:SS"
-                  touch_time_str = current_dt.strftime("%Y-%m-%d %H:%M:%S")
+                  # 2. Format ISO date string with explicit Norway GMT+01 offset: "YYYY-MM-DD 13:00:00 +01:00"
+                  touch_time_str = current_dt.strftime("%Y-%m-%d %H:%M:%S") + " +01:00"
                   
-                  # 3. Apply touch -d using only the specified date string
+                  # 3. Apply touch -d using the exact date and offset string
                   subprocess.run(["touch", "-d", touch_time_str, out_path], check=True)
 
                   # Increment per file by 1 second
