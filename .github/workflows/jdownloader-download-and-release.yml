@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       target_date:
-        description: 'Timestamp to set (Format: YYYY-MM-DD)'
+        description: 'Timestamp to set (Format: YYYY-MM-DD or YYYY-MM-DD HH:MM)'
         required: true
         type: string
       gotohp_creds_key:
@@ -109,15 +109,24 @@ jobs:
 
           raw_input = "${{ inputs.target_date }}".strip()
           
-          # Clean parse YYYY-MM-DD
-          try:
-              base_date = datetime.strptime(raw_input, "%Y-%m-%d")
-          except ValueError:
-              base_date = datetime.utcnow()
+          # Flexible parsing for YYYY-MM-DD HH:MM:SS, YYYY-MM-DD HH:MM, or YYYY-MM-DD
+          base_date = None
+          matched_fmt = None
+          for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+              try:
+                  base_date = datetime.strptime(raw_input, fmt)
+                  matched_fmt = fmt
+                  break
+              except ValueError:
+                  pass
 
-          # Set target time directly to 13:00:00
-          current_dt = base_date.replace(hour=13, minute=0, second=0)
+          if base_date is None:
+              base_date = datetime.utcnow().replace(hour=13, minute=0, second=0)
+          elif matched_fmt == "%Y-%m-%d":
+              # Default time to 13:00 if date only is provided
+              base_date = base_date.replace(hour=13, minute=0, second=0)
 
+          current_dt = base_date
           raw_files = sorted(glob.glob("raw_downloads/*"))
 
           for file_path in raw_files:
@@ -125,7 +134,7 @@ jobs:
                   orig_filename = os.path.basename(file_path)
                   out_path = os.path.join("processed_downloads", orig_filename)
                   
-                  # 1. Deep strip container and stream metadata
+                  # 1. Deep strip container and stream level metadata
                   cmd = [
                       "ffmpeg", "-i", file_path,
                       "-map_metadata", "-1",
@@ -139,13 +148,13 @@ jobs:
                   if res.returncode != 0:
                       subprocess.run(["cp", file_path, out_path])
 
-                  # 2. Format ISO date string with explicit Norway GMT+01 offset: "YYYY-MM-DD 13:00:00 +01:00"
-                  touch_time_str = current_dt.strftime("%Y-%m-%d %H:%M:%S") + " +01:00"
+                  # 2. Format ISO date string with explicit CEST Norway offset (+02:00)
+                  touch_time_str = current_dt.strftime("%Y-%m-%d %H:%M:%S") + " +02:00"
                   
-                  # 3. Apply touch -d using the exact date and offset string
+                  # 3. Apply touch -d directly to the output file
                   subprocess.run(["touch", "-d", touch_time_str, out_path], check=True)
 
-                  # Increment per file by 1 second
+                  # Increment time by 1 second for each file to preserve sequence
                   current_dt += timedelta(seconds=1)
           '
 
