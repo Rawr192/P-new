@@ -10,7 +10,7 @@ on:
       target_date:
         description: 'Timestamp for touch -d (Format: YYYY-MM-DD hh:mm)'
         required: true
-        default: '2026-08-31 06:00'
+        default: '2026-10-04 13:00'
         type: string
       gotohp_creds_key:
         description: 'GotoHP Creds Key (e.g. androidId=...)'
