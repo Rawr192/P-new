@@ -10,6 +10,7 @@ on:
       target_date:
         description: 'Dato/tid for metadata (ÅÅÅÅ-MM-DD eller ÅÅÅÅ-MM-DD HH:MM:SS)'
         required: false
+        default: '2026-10-04 13:00'
         type: string
       gotohp_creds_key:
         description: 'Google Photos (gotohp) legitimasjonsnøkkel / Creds Key'
