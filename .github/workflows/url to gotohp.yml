@@ -67,38 +67,33 @@ jobs:
             COOKIE_PARAM=""
           fi
 
-          # Hent URL-er fra links.txt på GitHub eller bruk input hvis oppgitt
           INPUT_URLS="${{ github.event.inputs.video_url }}"
           
           if [ -n "$INPUT_URLS" ]; then
             echo "Bruker URL-er fra manuelt input..."
-            URL_DATA="$INPUT_URLS"
+            echo "$INPUT_URLS" | tr ',' '\n' > links.txt
           else
             echo "Henter URL-er fra links.txt på GitHub..."
-            URL_DATA=$(curl -sL "https://raw.githubusercontent.com/Rawr192/P-new/refs/heads/main/links.txt")
+            curl -sL "https://raw.githubusercontent.com/Rawr192/P-new/refs/heads/main/links.txt" -o links.txt
           fi
 
-          # Normaliser ved å erstatte kommaer og linjeskift med mellomrom
-          NORMALIZED_URLS=$(echo "$URL_DATA" | tr ',\n\r' '   ')
-          
-          if [ -z "$(echo "$NORMALIZED_URLS" | xargs)" ]; then
-            echo "Feil: Ingen gyldige URL-er ble funnet i links.txt eller input."
-            exit 1
-          fi
+          # Fjern tomme linjer og Windows-linjeskift (\r)
+          sed -i '/^[[:space:]]*$/d; s/\r//g' links.txt
 
-          echo "URL-er som skal lastes ned:"
-          echo "$NORMALIZED_URLS"
-          
-          # Kjør yt-dlp med User-Agent, Referer, cookies og impersonate
-          yt-dlp --newline $COOKIE_PARAM \
+          echo "=== LINKER SOM SKAL LASTES NED ==="
+          cat links.txt
+          echo "=================================="
+
+          # Kjør yt-dlp med --batch-file og -i (--ignore-errors) slik at den ikke stopper ved feil
+          yt-dlp --newline --ignore-errors $COOKIE_PARAM \
+            --batch-file links.txt \
             --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
             --referer "https://www.pornhub.com/" \
             --impersonate chrome \
-            -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" \
-            $NORMALIZED_URLS
+            -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
           
-          # Rydd opp cookie-filen
-          rm -f cookies.txt
+          # Rydd opp midlertidige filer
+          rm -f cookies.txt links.txt
 
       - name: Inject Norway Metadata and Set Timestamp (Python)
         run: |
