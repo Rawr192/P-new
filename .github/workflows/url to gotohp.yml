@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       video_url:
-        description: 'Lim inn URL-en til videoen du vil laste ned'
+        description: 'Lim inn URL-en(e) (separert med mellomrom eller komma)'
         required: true
         type: string
       target_date:
@@ -51,14 +51,18 @@ jobs:
           chmod +x /usr/local/bin/gotohp-cli
           gotohp-cli --version || true
 
-      - name: Last ned videoen i beste kvalitet med curl_cffi
+      - name: Last ned videoene i beste kvalitet med curl_cffi
         id: download_step
         run: |
           mkdir downloads
           cd downloads
           
+          # Normaliserer input ved å bytte ut kommaer med mellomrom, slik at yt-dlp kan ta imot flere URL-er
+          INPUT_URLS="${{ github.event.inputs.video_url }}"
+          NORMALIZED_URLS=$(echo "$INPUT_URLS" | tr ',' ' ')
+          
           # yt-dlp bruker curl_cffi automatisk her for å etterligne Chrome
-          yt-dlp --impersonate chrome -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" "${{ github.event.inputs.video_url }}"
+          yt-dlp --impersonate chrome -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" $NORMALIZED_URLS
 
       - name: Inject Norway Metadata and Set Timestamp (Python)
         run: |
@@ -86,7 +90,6 @@ jobs:
               base_date = base_date.replace(hour=13, minute=0, second=0)
 
           current_dt = base_date
-          # Endret fra "raw_downloads/*" til "downloads/*" slik at skriptet finner videoen fra yt-dlp
           raw_files = sorted(glob.glob("downloads/*"))
 
           for file_path in raw_files:
