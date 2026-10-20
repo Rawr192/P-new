@@ -32,6 +32,11 @@ jobs:
       - name: Sjekk ut kodebasen
         uses: actions/checkout@v4
 
+      - name: Set up Cloudflare WARP
+        uses: sebst/actions-warp@v1
+        with:
+          tos: YES
+
       - name: Installer Python
         uses: actions/setup-python@v5
         with:
@@ -46,7 +51,7 @@ jobs:
 
       - name: Installer gotohp-cli
         run: |
-          curl -sL "https://github.com" -o /usr/local/bin/gotohp-cli
+          curl -sL "https://github.com/xob0t/gotohp/releases/download/v0.10.0/gotohp-cli_amd64" -o /usr/local/bin/gotohp-cli
           chmod +x /usr/local/bin/gotohp-cli
           gotohp-cli --version || true
 
@@ -70,7 +75,7 @@ jobs:
           INPUT_URLS="${{ github.event.inputs.video_url }}"
           NORMALIZED_URLS=$(echo "$INPUT_URLS" | tr ',' ' ')
           
-          # Kjør yt-dlp med cookies og impersonate
+          # Kjør yt-dlp gjennom WARP-tunnelen med cookies og impersonate
           yt-dlp $COOKIE_PARAM --impersonate chrome -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" $NORMALIZED_URLS
           
           # Rydd opp cookie-filen
