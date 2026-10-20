@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       video_url:
-        description: 'Lim inn URL-en(e) (separert med mellomrom eller komma)'
-        required: true
+        description: 'Lim inn URL-en(e) (Valgfritt - lar du denne stå tom hentes URL-er fra links.txt)'
+        required: false
         type: string
       target_date:
         description: 'Dato/tid for metadata (ÅÅÅÅ-MM-DD eller ÅÅÅÅ-MM-DD HH:MM:SS)'
@@ -67,9 +67,27 @@ jobs:
             COOKIE_PARAM=""
           fi
 
-          # Normaliser input ved å bytte ut kommaer med mellomrom
+          # Hent URL-er fra links.txt på GitHub eller bruk input hvis oppgitt
           INPUT_URLS="${{ github.event.inputs.video_url }}"
-          NORMALIZED_URLS=$(echo "$INPUT_URLS" | tr ',' ' ')
+          
+          if [ -n "$INPUT_URLS" ]; then
+            echo "Bruker URL-er fra manuelt input..."
+            URL_DATA="$INPUT_URLS"
+          else
+            echo "Henter URL-er fra links.txt på GitHub..."
+            URL_DATA=$(curl -sL "https://raw.githubusercontent.com/Rawr192/P-new/refs/heads/main/links.txt")
+          fi
+
+          # Normaliser ved å erstatte kommaer og linjeskift med mellomrom
+          NORMALIZED_URLS=$(echo "$URL_DATA" | tr ',\n\r' '   ')
+          
+          if [ -z "$(echo "$NORMALIZED_URLS" | xargs)" ]; then
+            echo "Feil: Ingen gyldige URL-er ble funnet i links.txt eller input."
+            exit 1
+          fi
+
+          echo "URL-er som skal lastes ned:"
+          echo "$NORMALIZED_URLS"
           
           # Kjør yt-dlp med User-Agent, Referer, cookies og impersonate
           yt-dlp --newline $COOKIE_PARAM \
