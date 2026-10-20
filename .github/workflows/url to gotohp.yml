@@ -47,7 +47,7 @@ jobs:
 
       - name: Installer gotohp-cli
         run: |
-          curl -sL "https://github.com/xob0t/gotohp/releases/download/v0.10.0/gotohp-cli_amd64"" -o /usr/local/bin/gotohp-cli
+          curl -sL "https://github.com/xob0t/gotohp/releases/download/v0.10.0/gotohp-cli_amd64" -o /usr/local/bin/gotohp-cli
           chmod +x /usr/local/bin/gotohp-cli
           gotohp-cli --version || true
 
