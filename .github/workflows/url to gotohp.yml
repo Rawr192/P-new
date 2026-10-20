@@ -32,11 +32,6 @@ jobs:
       - name: Sjekk ut kodebasen
         uses: actions/checkout@v4
 
-      - name: Set up Cloudflare WARP
-        uses: sebst/actions-warp@v1
-        with:
-          tos: YES
-
       - name: Installer Python
         uses: actions/setup-python@v5
         with:
@@ -51,14 +46,15 @@ jobs:
 
       - name: Installer gotohp-cli
         run: |
-          curl -sL "https://github.com/xob0t/gotohp/releases/download/v0.10.0/gotohp-cli_amd64" -o /usr/local/bin/gotohp-cli
+          curl -sL "https://github.com" -o /usr/local/bin/gotohp-cli
           chmod +x /usr/local/bin/gotohp-cli
           gotohp-cli --version || true
 
-      - name: Last ned videoene i beste kvalitet med curl_cffi og cookies
+      - name: Last ned videoene i beste kvalitet med curl_cffi, cookies og custom headers
         id: download_step
         env:
           PORNHUB_COOKIES: ${{ secrets.PORNHUB_COOKIES }}
+          PYTHONUNBUFFERED: "1"
         run: |
           mkdir downloads
           cd downloads
@@ -75,8 +71,13 @@ jobs:
           INPUT_URLS="${{ github.event.inputs.video_url }}"
           NORMALIZED_URLS=$(echo "$INPUT_URLS" | tr ',' ' ')
           
-          # Kjør yt-dlp gjennom WARP-tunnelen med cookies og impersonate
-          yt-dlp $COOKIE_PARAM --impersonate chrome -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" $NORMALIZED_URLS
+          # Kjør yt-dlp med User-Agent, Referer, cookies og impersonate
+          yt-dlp --newline $COOKIE_PARAM \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
+            --referer "https://www.pornhub.com/" \
+            --impersonate chrome \
+            -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" \
+            $NORMALIZED_URLS
           
           # Rydd opp cookie-filen
           rm -f cookies.txt
